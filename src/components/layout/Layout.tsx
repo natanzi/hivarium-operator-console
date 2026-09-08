@@ -15,8 +15,8 @@ export function Layout({ children, className }: LayoutProps) {
   return (
     <div className="bg-background flex min-h-svh w-full">
       <Sidebar />
-      <main className={cn("flex-1 min-w-0", className)}>
-        <div className="mx-auto flex min-h-svh w-full max-w-6xl flex-col px-6 py-8 md:px-10">
+      <main className={cn("flex-1 min-w-0 bg-background", className)}>
+        <div className="flex min-h-svh w-full max-w-[1440px] flex-col px-6 py-8 md:px-10 lg:px-12">
           {children}
         </div>
       </main>
