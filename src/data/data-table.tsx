@@ -7,7 +7,7 @@ import {
   useReactTable,
   type Row,
 } from "@tanstack/react-table";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 import {
@@ -76,6 +76,21 @@ export function DataTable<TData>({
   managedByConsumer,
 }: DataTableProps<TData>) {
   const [internalSorting, setInternalSorting] = useState<SortingState>([]);
+  const [internalPagination, setInternalPagination] = useState({
+    pageIndex: 0,
+    pageSize,
+  });
+
+  // When the page size changes, jump back to the first page so the visible
+  // range never points past the end of the data.
+  useEffect(() => {
+    if (managedByConsumer) return;
+    setInternalPagination((prev) =>
+      prev.pageSize === pageSize && prev.pageIndex === 0
+        ? prev
+        : { pageIndex: 0, pageSize }
+    );
+  }, [pageSize, managedByConsumer]);
 
   const table = useReactTable({
     data: managedByConsumer ? managedByConsumer.data : data,
@@ -84,6 +99,7 @@ export function DataTable<TData>({
     manualSorting: true,
     state: {
       sorting: managedByConsumer ? managedByConsumer.sorting : internalSorting,
+      pagination: managedByConsumer ? undefined : internalPagination,
     },
     onSortingChange: (updater) => {
       const next =
@@ -97,11 +113,34 @@ export function DataTable<TData>({
         setInternalSorting(next ?? []);
       }
     },
+    onPaginationChange: managedByConsumer ? undefined : setInternalPagination,
     manualPagination: true,
     pageCount: managedByConsumer ? managedByConsumer.pageCount : -1,
     getCoreRowModel: getCoreRowModel(),
     initialState: { pagination: { pageIndex: 0, pageSize } },
   });
+
+  // Pagination bounds. `itemsTo` must be derived from the page index and page
+  // size (clamped to the total), never from the number of rows currently
+  // rendered, and the page index is clamped so negative or out-of-range values
+  // cannot produce ranges like "Showing 25-6 of 6".
+  const totalCount = managedByConsumer
+    ? managedByConsumer.data.length
+    : data.length;
+  const rawPageIndex = managedByConsumer
+    ? managedByConsumer.pageIndex
+    : table.getState().pagination.pageIndex;
+  const pageCount = managedByConsumer
+    ? managedByConsumer.pageCount
+    : Math.max(1, Math.ceil(totalCount / pageSize));
+  const safePageIndex = Math.max(
+    0,
+    Math.min(rawPageIndex, Math.max(0, pageCount - 1))
+  );
+  const itemsFrom = totalCount === 0 ? 0 : safePageIndex * pageSize + 1;
+  const itemsTo = Math.min((safePageIndex + 1) * pageSize, totalCount);
+  const canPrev = rawPageIndex > 0;
+  const canNext = rawPageIndex < pageCount - 1;
 
   return (
     <div className="space-y-3">
@@ -181,45 +220,19 @@ export function DataTable<TData>({
         </Table>
       </div>
       <PaginationFooter
-        totalCount={
-          managedByConsumer ? managedByConsumer.data.length : data.length
-        }
+        totalCount={totalCount}
         onPrev={
           managedByConsumer ? managedByConsumer.onPrevPage : () => table.previousPage()
         }
         onNext={
           managedByConsumer ? managedByConsumer.onNextPage : () => table.nextPage()
         }
-        page={
-          managedByConsumer
-            ? managedByConsumer.pageIndex
-            : table.getState().pagination.pageIndex
-        }
-        pageCount={
-          managedByConsumer
-            ? managedByConsumer.pageCount
-            : table.getPageCount()
-        }
-        canPrev={managedByConsumer ? table.getCanPreviousPage() : true}
-        canNext={managedByConsumer ? table.getCanNextPage() : true}
-        itemsFrom={
-          managedByConsumer
-            ? Math.min(
-                managedByConsumer.pageIndex * pageSize + 1,
-                managedByConsumer.data.length
-              )
-            : table.getRowModel().rows.length === 0
-              ? 0
-              : table.getState().pagination.pageIndex * pageSize + 1
-        }
-        itemsTo={
-          managedByConsumer
-            ? Math.min(
-                (managedByConsumer.pageIndex + 1) * pageSize,
-                managedByConsumer.data.length
-              )
-            : table.getRowModel().rows.length
-        }
+        page={safePageIndex}
+        pageCount={pageCount}
+        canPrev={canPrev}
+        canNext={canNext}
+        itemsFrom={itemsFrom}
+        itemsTo={itemsTo}
       />
     </div>
   );

@@ -1,15 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  Check,
-  Copy,
-  RotateCcw,
-  Search,
-  Trash2,
-  UserPlus,
-} from "lucide-react";
+import { RotateCcw, Search, UserPlus } from "lucide-react";
 
 import {
   CUSTOMER_STATUS_LABELS,
@@ -17,16 +7,20 @@ import {
   STATUS_BADGE_CLASS,
 } from "@/data/seed-data";
 import { buildSeedStore } from "@/data/seed-data";
-import type { HiveRepository } from "@/data/local-storage-repository";
 import { createInMemoryRepository } from "@/data/local-storage-repository";
 import { useRepository } from "@/data/repository-context";
-import { customerAge, formatDate, initials } from "@/lib/format";
-import type { Customer, CustomerStatus } from "@/domain/types";
+import { formatDate } from "@/lib/format";
+import type {
+  AgentLicense,
+  Customer,
+  CustomerStatus,
+  FeatureEntitlement,
+  Subscription,
+} from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { DataTable, type DataTableColumn } from "@/data/data-table";
-import { Avatar, StatRow } from "@/components/ui/primitives";
+import { Avatar } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layout/Layout";
 
@@ -45,8 +39,6 @@ export function CustomersPage() {
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
-  const [sortBy, setSortBy] = useState<"name" | "createdAt">("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -56,20 +48,15 @@ export function CustomersPage() {
         q.length === 0
           ? true
           : c.name.toLowerCase().includes(q) ||
-            c.domain.toLowerCase().includes(q) ||
-            c.contact.toLowerCase().includes(q)
+          c.domain.toLowerCase().includes(q) ||
+          c.contact.toLowerCase().includes(q)
       )
-      .sort((a, b) => {
-        const av = sortBy === "name" ? a.name : a.createdAt;
-        const bv = sortBy === "name" ? b.name : b.createdAt;
-        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-        return sortDir === "asc" ? cmp : -cmp;
-      });
-  }, [customers, search, status, sortBy, sortDir]);
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [customers, search, status]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<CustomerStatus, number> = {
-      trial: 0,
+      evaluation: 0,
       active: 0,
       paused: 0,
       churned: 0,
@@ -78,21 +65,35 @@ export function CustomersPage() {
     return counts;
   }, [customers]);
 
-  const toggleSort = (field: "name" | "createdAt") => {
-    if (sortBy === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortBy(field);
-      setSortDir("asc");
+  // Per-customer related records (subscriptions, entitlements, licenses) plus
+  // the agent product catalog, so the table columns can render without
+  // re-querying the repository for every row.
+  const related = useMemo(() => {
+    const subscriptions = new Map<string, Subscription[]>();
+    const entitlements = new Map<string, FeatureEntitlement[]>();
+    const licenses = new Map<string, AgentLicense[]>();
+    const productNames = new Map(
+      repo.listAgentProducts().map((p) => [p.id, p.name] as const)
+    );
+    for (const c of customers) {
+      subscriptions.set(c.id, repo.getSubscriptions(c.id));
+      entitlements.set(c.id, repo.getFeatureEntitlements(c.id));
+      licenses.set(c.id, repo.getAgentLicenses(c.id));
     }
-  };
+    return { subscriptions, entitlements, licenses, productNames };
+  }, [repo, customers]);
 
-  const columns: DataTableColumn<Customer>[] = useMemo(
-    () => [
+  const columns: DataTableColumn<Customer>[] = useMemo(() => {
+    const activeSubs = (c: Customer) =>
+      (related.subscriptions.get(c.id) ?? []).filter(
+        (s) => s.status === "active" || s.status === "trialing"
+      );
+
+    return [
       {
-        id: "customer",
-        header: "Customer",
-        className: "min-w-[260px]",
+        id: "organization",
+        header: "Organization",
+        className: "min-w-[240px]",
         cell: (c) => (
           <div className="flex items-center gap-3">
             <Avatar name={c.name} id={c.id} />
@@ -104,18 +105,8 @@ export function CustomersPage() {
         ),
       },
       {
-        id: "contact",
-        header: "Contact",
-        cell: (c) => (
-          <div className="leading-tight">
-            <p className="text-sm">{c.contact}</p>
-            <p className="text-muted-foreground text-xs">{c.email}</p>
-          </div>
-        ),
-      },
-      {
-        id: "status",
-        header: "Status",
+        id: "lifecycle",
+        header: "Lifecycle",
         cell: (c) => (
           <span
             className={cn(
@@ -129,33 +120,128 @@ export function CustomersPage() {
         ),
       },
       {
-        id: "createdAt",
-        header: "Customer since",
-        sortable: true,
-        cell: (c) => (
-          <span className="text-sm">
-            {formatDate(c.createdAt)}{" "}
-            <span className="text-muted-foreground text-xs">
-              · {customerAge(c.createdAt)}
-            </span>
-          </span>
-        ),
+        id: "subscription",
+        header: "Subscription",
+        cell: (c) => {
+          const subs = activeSubs(c);
+          if (subs.length === 0) {
+            return <span className="text-muted-foreground text-sm">—</span>;
+          }
+          const plans = [
+            ...new Set(subs.map((s) => PLAN_LABELS[s.plan])),
+          ].join(", ");
+          const seats = subs.reduce((n, s) => n + s.seats, 0);
+          return (
+            <div className="leading-tight">
+              <p className="text-sm">{plans}</p>
+              <p className="text-muted-foreground text-xs tabular-nums">
+                {seats} {seats === 1 ? "seat" : "seats"}
+              </p>
+            </div>
+          );
+        },
       },
       {
-        id: "since",
-        header: "Seats",
+        id: "deployment",
+        header: "Deployment",
+        cell: (c) => {
+          const names = [
+            ...new Set(
+              activeSubs(c).map(
+                (s) =>
+                  related.productNames.get(s.agentProductId) ??
+                  s.agentProductId
+              )
+            ),
+          ];
+          if (names.length === 0) {
+            return <span className="text-muted-foreground text-sm">—</span>;
+          }
+          return <span className="text-sm">{names.join(", ")}</span>;
+        },
+      },
+      {
+        id: "features",
+        header: "Features",
+        cell: (c) => {
+          const list = related.entitlements.get(c.id) ?? [];
+          if (list.length === 0) {
+            return <span className="text-muted-foreground text-sm">—</span>;
+          }
+          return (
+            <span
+              className="tabular-nums text-sm"
+              title={list.map((e) => e.feature).join(", ")}
+            >
+              {list.length}
+            </span>
+          );
+        },
+      },
+      {
+        id: "agents",
+        header: "Agents",
+        cell: (c) => {
+          const list = related.licenses.get(c.id) ?? [];
+          if (list.length === 0) {
+            return <span className="text-muted-foreground text-sm">—</span>;
+          }
+          return (
+            <span
+              className="tabular-nums text-sm"
+              title={list
+                .map(
+                  (l) =>
+                    related.productNames.get(l.agentProductId) ??
+                    l.agentProductId
+                )
+                .join(", ")}
+            >
+              {list.length}
+            </span>
+          );
+        },
+      },
+      {
+        id: "updated",
+        header: "Updated",
+        cell: (c) => {
+          const dates = [
+            ...(related.subscriptions.get(c.id) ?? []).map((s) => s.renewsAt),
+            ...(related.entitlements.get(c.id) ?? []).map((e) => e.grantedAt),
+            ...(related.licenses.get(c.id) ?? []).map((l) => l.issuedAt),
+          ];
+          const latest =
+            dates.length > 0 ? dates.sort()[dates.length - 1] : c.createdAt;
+          return <span className="text-sm">{formatDate(latest)}</span>;
+        },
+      },
+      {
+        id: "actions",
+        header: "Actions",
         cell: (c) => (
-          <span className="tabular-nums text-sm">
-            {repo.getSubscriptions(c.id).reduce(
-              (n, s) => (s.status === "active" || s.status === "trialing" ? n + s.seats : n),
-              0
-            )}
-          </span>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/customers/${c.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-primary text-sm font-medium hover:underline"
+              data-testid={`view-${c.id}`}
+            >
+              View
+            </a>
+            <a
+              href={`/customers/${c.id}/edit`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-muted-foreground hover:text-foreground text-sm"
+              data-testid={`edit-${c.id}`}
+            >
+              Edit
+            </a>
+          </div>
         ),
       },
-    ],
-    [repo]
-  );
+    ];
+  }, [related]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -172,33 +258,11 @@ export function CustomersPage() {
         </Button>
       </PageHeader>
 
-      <StatRow
-        items={[
-          {
-            icon: UsersIcon,
-            label: "Total",
-            values: [{ value: "all", count: customers.length }],
-            accent: "primary",
-          },
-          {
-            icon: Check,
-            label: "Active",
-            values: [{ value: "active", count: statusCounts.active }],
-            accent: "sage",
-          },
-          {
-            icon: ArrowUp,
-            label: "Trial",
-            values: [{ value: "trial", count: statusCounts.trial }],
-            accent: "gold",
-          },
-          {
-            icon: ArrowDown,
-            label: "Churned",
-            values: [{ value: "churned", count: statusCounts.churned }],
-            accent: "muted",
-          },
-        ]}
+      <SummaryStrip
+        total={customers.length}
+        active={statusCounts.active}
+        evaluation={statusCounts.evaluation}
+        archived={statusCounts.churned}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -214,7 +278,7 @@ export function CustomersPage() {
           />
         </div>
         <div className="flex items-center gap-2" role="radiogroup" aria-label="Filter by status">
-          {(["all", "active", "trial", "paused", "churned"] as const).map((s) => (
+          {(["all", "active", "evaluation", "paused", "churned"] as const).map((s) => (
             <StatusPill
               key={s}
               selected={status === s}
@@ -242,6 +306,58 @@ export function CustomersPage() {
 
       <ResetData />
     </div>
+  );
+}
+
+/**
+ * Compact summary strip replacing the previous row of large stat cards.
+ * Purely presentational — the status pills below the strip drive filtering.
+ */
+function SummaryStrip({
+  total,
+  active,
+  evaluation,
+  archived,
+}: {
+  total: number;
+  active: number;
+  evaluation: number;
+  archived: number;
+}) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border bg-card px-4 py-2.5 shadow-sm"
+      data-testid="summary-strip"
+    >
+      <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+        Summary
+      </span>
+      <SummaryItem label="Total" count={total} testId="summary-total" />
+      <SummaryItem label="Active" count={active} testId="summary-active" />
+      <SummaryItem
+        label="Evaluation"
+        count={evaluation}
+        testId="summary-evaluation"
+      />
+      <SummaryItem label="Archived" count={archived} testId="summary-archived" />
+    </div>
+  );
+}
+
+function SummaryItem({
+  label,
+  count,
+  testId,
+}: {
+  label: string;
+  count: number;
+  testId: string;
+}) {
+  return (
+    <span className="flex items-baseline gap-1.5" data-testid={testId}>
+      <span className="tabular-nums text-sm font-semibold">{count}</span>
+      <span className="text-muted-foreground text-xs">{label}</span>
+    </span>
   );
 }
 
@@ -273,33 +389,7 @@ function StatusPill({
   );
 }
 
-function UsersIcon({ className }: { className?: string }) {
-  return <UserIcon className={className} />;
-}
-
-function UserIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
 function ResetData() {
-  const repo = useRepository();
   const [confirmed, setConfirmed] = useState(false);
   const [lastReset, setLastReset] = useState<string | null>(null);
 

@@ -7,6 +7,7 @@ import type {
   FeatureEntitlement,
   Subscription,
 } from "@/domain/types";
+import { normalizeCustomerStatus } from "@/domain/types";
 import { buildSeedStore } from "@/data/seed-data";
 
 /** In-memory + optional localStorage persistence for the demo data store. */
@@ -93,8 +94,22 @@ export class LocalStorageRepository implements HiveRepository {
 
     try {
       const parsed = JSON.parse(raw) as Partial<DataStore>;
+      // Normalize any legacy (or unvalidated) statuses so the UI never renders
+      // a stale label. Only re-persist when something actually changed, so we
+      // avoid a write on every read.
+      const rawCustomers = (parsed.customers ?? []) as Customer[];
+      const customers = rawCustomers.map((c) => ({
+        ...c,
+        status: normalizeCustomerStatus(c.status),
+      }));
+      if (customers.some((c, i) => c.status !== rawCustomers[i].status)) {
+        this.storage.setItem(this.key, JSON.stringify({
+          ...parsed,
+          customers,
+        }));
+      }
       return {
-        customers: parsed.customers ?? [],
+        customers,
         subscriptions: parsed.subscriptions ?? [],
         featureEntitlements: parsed.featureEntitlements ?? [],
         agentProducts:

@@ -31,14 +31,14 @@ export const PLAN_LABELS: Record<PlanTier, string> = {
 };
 
 export const CUSTOMER_STATUS_LABELS: Record<CustomerStatus, string> = {
-  trial: "Trial",
+  evaluation: "Evaluation",
   active: "Active",
   paused: "Paused",
-  churned: "Churned",
+  churned: "Archived",
 };
 
 export const STATUS_BADGE_CLASS: Record<CustomerStatus, string> = {
-  trial: "border-gold/40 text-gold bg-gold-soft",
+  evaluation: "border-gold/40 text-gold bg-gold-soft",
   active: "border-sage/40 text-sage bg-sage-soft",
   paused: "border-border text-muted-foreground bg-muted",
   churned: "border-destructive/30 text-destructive bg-destructive/10",
@@ -268,9 +268,9 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
       domain: "sablefinch.example",
       contact: "Priya Raman",
       email: "priya.raman@sablefinch.example",
-      status: "trial",
+      status: "evaluation",
       notes:
-        "Fashion retailer on a 30-day trial of Sentinel. Evaluating alert-triage accuracy across two stores.",
+        "Fashion retailer evaluating Sentinel across two stores; alert-triage accuracy trial.",
       createdAt: "2026-07-28T16:20:00.000Z",
     },
     subscriptions: [

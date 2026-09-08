@@ -60,7 +60,7 @@ export function CreateCustomerPage() {
       domain: "",
       contact: "",
       email: "",
-      status: "trial",
+      status: "evaluation",
       notes: "",
     },
   });
@@ -264,6 +264,6 @@ const customerSchema = z.object({
     .string()
     .min(1, "Email is required.")
     .email("Enter a valid email address."),
-  status: z.enum(["trial", "active", "paused", "churned"]),
+  status: z.enum(["evaluation", "active", "paused", "churned"]),
   notes: z.string().max(2000, "Notes must be under 2000 characters."),
 });

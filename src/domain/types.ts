@@ -6,7 +6,7 @@
  * persisted to localStorage as-is.
  */
 
-export type CustomerStatus = "trial" | "active" | "paused" | "churned";
+export type CustomerStatus = "evaluation" | "active" | "paused" | "churned";
 
 /**
  * A billing/tenant customer of the Hivarium platform.
@@ -126,4 +126,38 @@ export interface DataStore {
   featureEntitlements: FeatureEntitlement[];
   agentProducts: AgentProduct[];
   agentLicenses: AgentLicense[];
+}
+
+export const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
+  "evaluation",
+  "active",
+  "paused",
+  "churned",
+];
+
+/**
+ * Legacy status values that older persisted stores may still contain. These
+ * are mapped to their current canonical form so the UI never renders a stale
+ * label. (The "trial" → "evaluation" rename happened after v1 seeding.)
+ */
+const LEGACY_STATUS_ALIASES: Record<string, CustomerStatus> = {
+  trial: "evaluation",
+  evaluation: "evaluation",
+  active: "active",
+  paused: "paused",
+  churned: "churned",
+};
+
+/**
+ * Coerce an arbitrary (possibly unvalidated) status value into a canonical
+ * {@link CustomerStatus}. Unknown values fall back to `"evaluation"`. This is
+ * the single place the "trial" → "evaluation" migration is applied, and it is
+ * used by the repository whenever a store is loaded from storage so that
+ * legacy localStorage payloads normalize transparently.
+ */
+export function normalizeCustomerStatus(
+  value: unknown
+): CustomerStatus {
+  if (typeof value !== "string") return "evaluation";
+  return LEGACY_STATUS_ALIASES[value] ?? "evaluation";
 }
