@@ -1,4 +1,4 @@
-import { ArrowLeft, Building2, KeyRound, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Building2, KeyRound, Pencil, ShieldCheck } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 
@@ -96,6 +96,12 @@ export function CustomerProfilePage() {
         id="customer-profile-title"
         description={`${customer.domain} · Customer since ${formatDate(customer.createdAt)}`}
       >
+        <Button variant="outline" size="sm" asChild>
+          <a href={`/customers/${customer.id}/edit`} data-testid="edit-customer-button">
+            <Pencil className="size-4" />
+            Edit customer
+          </a>
+        </Button>
         <Button variant="ghost" size="sm" asChild>
           <a href="/customers" data-testid="back-to-customers">
             <ArrowLeft className="size-4" />

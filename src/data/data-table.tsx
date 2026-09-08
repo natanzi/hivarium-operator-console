@@ -131,7 +131,7 @@ export function DataTable<TData>({
                               : undefined
                         }
                         className={cn(
-                          "inline-flex items-center gap-1.5 text-left text-xs font-semibold tracking-wider uppercase",
+                          "inline-flex items-center gap-1.5 text-left text-sm font-semibold tracking-wider uppercase",
                           !sortable && "cursor-default"
                         )}
                         data-testid={`header-${column.id}`}
@@ -325,7 +325,7 @@ function PaginationFooter({
         <PagerButton label="Previous page" disabled={!canPrev} onClick={onPrev}>
           ←
         </PagerButton>
-        <span className="text-muted-foreground tabular-nums px-2 text-xs">
+        <span className="text-muted-foreground tabular-nums px-2 text-sm">
           Page <span className="text-foreground">{page + 1}</span> of{" "}
           {Math.max(1, pageCount)}
         </span>

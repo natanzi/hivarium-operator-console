@@ -38,6 +38,7 @@ export interface HiveRepository {
   listCustomers(): Customer[];
   getCustomer(id: string): Customer | undefined;
   createCustomer(input: CustomerInput): Customer;
+  updateCustomer(id: string, input: CustomerInput): Customer;
 
   // --- Relationships for a customer ---------------------------------------
   getSubscriptions(customerId: string): Subscription[];
@@ -145,6 +146,20 @@ export class LocalStorageRepository implements HiveRepository {
     const created: Customer = { ...input, createdAt: now };
     this.write({ ...store, customers: [...store.customers, created] });
     return created;
+  }
+
+  updateCustomer(id: string, input: CustomerInput): Customer {
+    const store = this.read();
+    const existing = store.customers.find((c) => c.id === id);
+    if (!existing) {
+      throw new Error(`Customer with id "${id}" does not exist`);
+    }
+    const updated: Customer = { ...existing, ...input, id };
+    this.write({
+      ...store,
+      customers: store.customers.map((c) => (c.id === id ? updated : c)),
+    });
+    return updated;
   }
 
   getSubscriptions(customerId: string): Subscription[] {

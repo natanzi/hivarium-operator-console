@@ -9,6 +9,7 @@ import { AboutPage } from "@/features/about/pages/AboutPage";
 import { AgentCatalogPage } from "@/features/agents/pages/AgentCatalogPage";
 import { CustomersPage } from "@/features/customers/pages/CustomersPage";
 import { CreateCustomerPage } from "@/features/customers/pages/CreateCustomerPage";
+import { EditCustomerPage } from "@/features/customers/pages/EditCustomerPage";
 import { CustomerProfilePage } from "@/features/customers/pages/CustomerProfilePage";
 
 /**
@@ -19,6 +20,7 @@ import { CustomerProfilePage } from "@/features/customers/pages/CustomerProfileP
  *   /customers/new      → create customer form
  *   /customers/:id      → customer profile (tabs: overview, subscriptions,
  *                         entitlements, licenses)
+ *   /customers/:id/edit → edit customer form
  *   /agents             → read-only agent catalog
  *   /settings/about     → product information
  */
@@ -55,6 +57,14 @@ export const router = createBrowserRouter([
     element: (
       <RepositoryProvider repository={repository}>
         {withLayout(<CreateCustomerPage />)}
+      </RepositoryProvider>
+    ),
+  },
+  {
+    path: "/customers/:customerId/edit",
+    element: (
+      <RepositoryProvider repository={repository}>
+        {withLayout(<EditCustomerPage />)}
       </RepositoryProvider>
     ),
   },
