@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "coder-stack": {
+      "command": "/home/tanglab/.local/bin/coder-stack-mcp"
+    }
+  }
+}

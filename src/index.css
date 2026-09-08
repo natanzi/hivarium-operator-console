@@ -1,0 +1,142 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * Hivarium Operator Console — minimal, premium, warm enterprise theme.
+ *
+ * Palette:
+ *   background  #F5F2EC  warm paper
+ *   foreground  #211E1A  near-black warm charcoal
+ *   card        #FCFBF8  warm off-white
+ *   primary     #9A4B23  terracotta accent
+ *   gold        #9C7C38  secondary warm accent
+ *   sage        #5F7158  healthy/active status accent
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-sage: var(--sage);
+  --color-sage-soft: var(--sage-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: #f5f2ec;
+  --foreground: #211e1a;
+  --card: #fcfbf8;
+  --card-foreground: #211e1a;
+  --popover: #fcfbf8;
+  --popover-foreground: #211e1a;
+  --primary: #9a4b23;
+  --primary-foreground: #fdf8f1;
+  --primary-soft: #f2e0d3;
+  --gold: #9c7c38;
+  --gold-soft: #f1e8d2;
+  --sage: #5f7158;
+  --sage-soft: #e4e9e0;
+  --secondary: #ece7dd;
+  --secondary-foreground: #383229;
+  --muted: #ece8df;
+  --muted-foreground: #766e60;
+  --accent: #efe9de;
+  --accent-foreground: #33291f;
+  --destructive: #b23a32;
+  --border: #e3dccc;
+  --input: #ddd5c3;
+  --ring: #9a4b23;
+  --sidebar: #f9f7f2;
+  --sidebar-foreground: #4a4238;
+  --sidebar-primary: #9a4b23;
+  --sidebar-primary-foreground: #fdf8f1;
+  --sidebar-accent: #efe8db;
+  --sidebar-accent-foreground: #211e1a;
+  --sidebar-border: #e6dfd0;
+  --sidebar-ring: #9a4b23;
+}
+
+.dark {
+  --background: #1b1815;
+  --foreground: #f1ede6;
+  --card: #24201b;
+  --card-foreground: #f1ede6;
+  --popover: #24201b;
+  --popover-foreground: #f1ede6;
+  --primary: #cf8a5f;
+  --primary-foreground: #21150d;
+  --primary-soft: #42281a;
+  --gold: #c6a25c;
+  --gold-soft: #3c3321;
+  --sage: #8da385;
+  --sage-soft: #2b322a;
+  --secondary: #2e2923;
+  --secondary-foreground: #ede8df;
+  --muted: #2e2923;
+  --muted-foreground: #a49b8b;
+  --accent: #322c25;
+  --accent-foreground: #ede8df;
+  --destructive: #d06a62;
+  --border: #38322a;
+  --input: #453d32;
+  --ring: #cf8a5f;
+  --sidebar: #1f1b17;
+  --sidebar-foreground: #cfc7ba;
+  --sidebar-primary: #cf8a5f;
+  --sidebar-primary-foreground: #21150d;
+  --sidebar-accent: #2c2721;
+  --sidebar-accent-foreground: #f1ede6;
+  --sidebar-border: #332d25;
+  --sidebar-ring: #cf8a5f;
+}
+
+@layer base {
+  * {
+    @apply border-border font-sans;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "calt";
+  }
+  ::selection {
+    background-color: var(--primary-soft);
+    color: var(--primary-foreground);
+  }
+}
