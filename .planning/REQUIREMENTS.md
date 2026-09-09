@@ -78,21 +78,41 @@ Customer CRUD, confirmed local deletion, customer profiles, subscription/entitle
 
 ## Traceability
 
-Phase mappings are populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| COMM-01 through COMM-06 | Unmapped | Pending |
-| AGNT-01 through AGNT-04 | Unmapped | Pending |
-| LEDG-01 through LEDG-05 | Unmapped | Pending |
-| USGE-01 through USGE-05 | Unmapped | Pending |
-| SAFE-01 through SAFE-06 | Unmapped | Pending |
+| COMM-01 | Phase 1 | Pending |
+| COMM-02 | Phase 1 | Pending |
+| COMM-03 | Phase 1 | Pending |
+| COMM-04 | Phase 1 | Pending |
+| COMM-05 | Phase 1 | Pending |
+| COMM-06 | Phase 1 | Pending |
+| AGNT-01 | Phase 1 | Pending |
+| AGNT-02 | Phase 1 | Pending |
+| AGNT-03 | Phase 1 | Pending |
+| AGNT-04 | Phase 1 | Pending |
+| LEDG-01 | Phase 2 | Pending |
+| LEDG-02 | Phase 2 | Pending |
+| LEDG-03 | Phase 2 | Pending |
+| LEDG-04 | Phase 2 | Pending |
+| LEDG-05 | Phase 2 | Pending |
+| USGE-01 | Phase 2 | Pending |
+| USGE-02 | Phase 2 | Pending |
+| USGE-03 | Phase 2 | Pending |
+| USGE-04 | Phase 2 | Pending |
+| USGE-05 | Phase 2 | Pending |
+| SAFE-01 | Phase 3 | Pending |
+| SAFE-02 | Phase 2 | Pending |
+| SAFE-03 | Phase 3 | Pending |
+| SAFE-04 | Phase 3 | Pending |
+| SAFE-05 | Phase 3 | Pending |
+| SAFE-06 | Phase 3 | Pending |
 
 **Coverage:**
 - v1 requirements: 26 total
-- Mapped to phases: 0
-- Unmapped: 26 ⚠️
+- Mapped to phases: 26
+- Unmapped: 0 ✓
+- Duplicate mappings: 0 ✓
 
 ---
 *Requirements defined: 2026-09-09*
-*Last updated: 2026-09-09 after initial definition*
+*Last updated: 2026-09-09 after roadmap creation*
