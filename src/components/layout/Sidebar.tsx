@@ -1,4 +1,4 @@
-import { Boxes, Info, Users } from "lucide-react";
+import { Boxes, Info, LogOut, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -74,12 +74,35 @@ export function AppSidebar({ className }: SidebarProps) {
       </SidebarContent>
 
       <SidebarFooter>
-        <div className="border-border text-muted-foreground border-t px-5 py-4 text-xs">
-          <p className="font-medium">Phase 1 · Local data</p>
-          <p className="mt-1 leading-relaxed opacity-80">
-            Records persist to this browser&apos;s localStorage. Reset anytime
-            from the Customers screen.
-          </p>
+        <div className="border-border border-t p-3">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                className="h-10 border border-sidebar-border bg-sidebar-accent/40 font-medium shadow-sm hover:bg-sidebar-accent"
+              >
+                <a
+                  href="/cdn-cgi/access/logout"
+                  aria-label="Sign out of Hivarium Operator Console"
+                  data-testid="sign-out"
+                >
+                  <LogOut className="size-4 shrink-0 opacity-70" />
+                  <span>Sign out</span>
+                  <span className="text-muted-foreground ml-auto text-[10px] tracking-wide uppercase">
+                    Secure
+                  </span>
+                </a>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+
+          <div className="text-muted-foreground mt-3 border-t border-sidebar-border px-2 pt-3 text-xs">
+            <p className="font-medium">Phase 1 · Local data</p>
+            <p className="mt-1 leading-relaxed opacity-80">
+              Records persist to this browser&apos;s localStorage. Reset anytime
+              from the Customers screen.
+            </p>
+          </div>
         </div>
       </SidebarFooter>
 
