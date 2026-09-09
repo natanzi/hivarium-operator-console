@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { createBrowserRouter } from "react-router";
+import type { ReactNode } from "react";
+import { Navigate, createBrowserRouter } from "react-router";
 
 import { Layout } from "@/components/layout/Layout";
 import { Toaster } from "@/components/ui/sonner";
@@ -25,8 +25,8 @@ import { CustomerProfilePage } from "@/features/customers/pages/CustomerProfileP
  *   /settings/about     → product information
  */
 function withLayout(
-  children: React.ReactNode
-): React.ReactNode {
+  children: ReactNode
+): ReactNode {
   return (
     <Layout>
       {children}
@@ -103,23 +103,7 @@ export const router = createBrowserRouter([
 ]);
 
 function RootRedirect() {
-  // Redirect / to /customers. Uses a tiny effect so the component can render
-  // nothing in the meantime (avoids a double-render flicker in dev).
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    window.history.replaceState(null, "", "/customers");
-    setReady(true);
-  }, []);
-  if (!ready) return null;
-  return (
-    <Layout>
-      {/* The history.replaceState above navigates without a full reload, so
-          this subtree is never painted. */}
-      <div className="p-8 text-sm text-muted-foreground" aria-hidden="true">
-        Redirecting…
-      </div>
-    </Layout>
-  );
+  return <Navigate to="/customers" replace />;
 }
 
 function NotFound() {
