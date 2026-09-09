@@ -4,6 +4,11 @@
  * These are plain-data types shared by the data layer (repository, seed
  * data) and the UI. They are intentionally serializable so they can be
  * persisted to localStorage as-is.
+ *
+ * The store is versioned (`schemaVersion`). The active commercial/access
+ * records for a customer are {@link CommercialArrangement} and
+ * {@link AgentAccessGrant}; historical `Subscription` and `AgentLicense`
+ * records are migration inputs only (see {@link DataStoreV1}).
  */
 
 export type CustomerStatus = "evaluation" | "active" | "paused" | "churned";
@@ -33,17 +38,192 @@ export interface Customer {
 
 export type PlanTier = "starter" | "growth" | "scale" | "enterprise";
 
+// ---------------------------------------------------------------------------
+// Commercial arrangements
+// ---------------------------------------------------------------------------
+
+/** Lifecycle status of a normalized commercial arrangement. */
+export type CommercialArrangementStatus =
+  | "active"
+  | "scheduled"
+  | "ended"
+  | "terminated";
+
+/**
+ * Common fields shared by every commercial arrangement record.
+ *
+ * `effectiveFrom` is the ISO-8601 date the arrangement started (already
+ * effective) or will start (if still `scheduled`). `effectiveTo` is optional;
+ * when present, no newer arrangement may exist for the customer with an
+ * `effectiveFrom` before this date.
+ */
+export interface CommercialArrangementBase {
+  id: string;
+  customerId: string;
+  status: CommercialArrangementStatus;
+  effectiveFrom: string;
+  /** Optional expiry/termination timestamp. `null` means still open-ended. */
+  effectiveTo: string | null;
+  createdAt: string;
+  /** Operator-provided reason (replacement, termination, etc.). */
+  reason: string;
+}
+
+/**
+ * Monthly subscription — fixed recurring monthly amount, always billed in USD.
+ * `billingCadence` is fixed at `"monthly"`; the model discriminant is
+ * `"monthly"`.
+ */
+export interface MonthlyCommercialArrangement
+  extends CommercialArrangementBase {
+  model: "monthly";
+  currency: "USD";
+  billingCadence: "monthly";
+  /** Fixed monthly amount in integer cents (>= 0). */
+  monthlyAmountCents: number;
+  /** Next renewal date as an ISO-8601 timestamp. */
+  renewsAt: string;
+}
+
+/**
+ * Prepaid usage balance. The detailed usage ledger is added in Phase 2; this
+ * record only stores the USD balance and optional expiry.
+ */
+export interface PrepaidCommercialArrangement
+  extends CommercialArrangementBase {
+  model: "prepaid";
+  currency: "USD";
+  balanceCents: number;
+  expiresAt: string | null;
+}
+
+/**
+ * Annual contract with an included allowance and overage rate. Detailed
+ * usage/overage calculation is Phase 2; the terms are stored here only.
+ */
+export interface AnnualCommercialArrangement
+  extends CommercialArrangementBase {
+  model: "annual";
+  currency: "USD";
+  contractValueCents: number;
+  startsAt: string;
+  endsAt: string;
+  includedAllowance: number;
+  allowanceUnit: string;
+  overageRateCents: number;
+}
+
+/** Discriminated union of the three supported commercial models. */
+export type CommercialArrangement =
+  | MonthlyCommercialArrangement
+  | PrepaidCommercialArrangement
+  | AnnualCommercialArrangement;
+
+// ---------------------------------------------------------------------------
+// Agent access grants
+// ---------------------------------------------------------------------------
+
+/** Deterministic access state as of an explicit timestamp. */
+export type AgentAccessStatus =
+  | "scheduled"
+  | "active"
+  | "expired"
+  | "revoked";
+
+/**
+ * A customer's access to run a catalog {@link AgentProduct}.
+ *
+ * `startsAt` is the ISO-8601 date access becomes active; `endsAt` is optional
+ * and means access naturally expires before/during that date. `revokedAt`
+ * records an operator-initiated immediate revocation, and `scheduledRevokeAt`
+ * a revocation that will take effect on a future date. `reasonForChange`
+ * explains the change in human-readable language.
+ */
+export interface AgentAccessGrant {
+  id: string;
+  customerId: string;
+  agentProductId: string;
+  startsAt: string;
+  endsAt: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+  scheduledRevokeAt: string | null;
+  /** Linked activity event id that recorded the creation of this grant. */
+  activityEventId: string;
+  reasonForChange: string;
+}
+
+// ---------------------------------------------------------------------------
+// Activity events
+// ---------------------------------------------------------------------------
+
+export type ActivitySource = "operator" | "system" | "migration";
+
+/**
+ * An immutable, append-only timeline entry for a commercial or access change.
+ */
+export interface ActivityEvent {
+  id: string;
+  occurredAt: string;
+  source: ActivitySource;
+  type: "commercial.created" | "access.granted" | "access.revoked";
+  /** Customer id for customer-scoped events. */
+  customerId: string;
+  /** Human-readable action label. */
+  label: string;
+  /** Primary subject (arrangement or grant) id. */
+  subjectId: string;
+  /** Optional secondary subject id (e.g. product id). */
+  subjectId2?: string;
+  /** Resulting state label for the subject (e.g. "active", "revoked"). */
+  resultingState: string;
+  /** Optional causation id (event that triggered this one). */
+  causationId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Storage schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical, versioned persisted store (`schemaVersion: 2`).
+ *
+ * `commercialArrangements`, `agentAccessGrants`, and `activityEvents` are the
+ * active generalized records. `customers`, `featureEntitlements`, and
+ * `agentProducts` continue to hold shared data. Legacy v1-only collections
+ * (`subscriptions`, `agentLicenses`) are intentionally absent; their meaning
+ * is carried by the active records after migration.
+ */
+export interface DataStore {
+  schemaVersion: 2;
+  customers: Customer[];
+  featureEntitlements: FeatureEntitlement[];
+  agentProducts: AgentProduct[];
+  commercialArrangements: CommercialArrangement[];
+  agentAccessGrants: AgentAccessGrant[];
+  activityEvents: ActivityEvent[];
+}
+
+/**
+ * Historical v1 store shape. Referenced by migration tests, never as the
+ * active shape. `subscriptions` and `agentLicenses` are the migration inputs
+ * only.
+ */
+export interface DataStoreV1 {
+  customers: Customer[];
+  subscriptions: Subscription[];
+  featureEntitlements: FeatureEntitlement[];
+  agentProducts: AgentProduct[];
+  agentLicenses: AgentLicense[];
+}
+
+// ---------------------------------------------------------------------------
+// Legacy records (migration inputs — DO NOT add new UI based on these)
+// ---------------------------------------------------------------------------
+
 /**
  * An active or historical subscription tied to a customer.
- *
- * @property id                Stable, deterministic identifier.
- * @property customerId        Owning customer id.
- * @property plan              Commercial tier the customer is on.
- * @property agentProductId    Agent product the subscription unlocks.
- * @property seats             Provisioned seat count.
- * @property startedAt         ISO-8601 subscription start date.
- * @property renewsAt          ISO-8601 next renewal date.
- * @property status            Whether the subscription is currently live or not.
+ * Retained for backward-compatible migration from v1 stores only.
  */
 export interface Subscription {
   id: string;
@@ -58,13 +238,6 @@ export interface Subscription {
 
 /**
  * A capability unlocked for a customer by a subscription.
- *
- * @property id            Stable, deterministic identifier.
- * @property customerId    Owning customer id.
- * @property feature       Machine-readable feature key (e.g. "webhooks").
- * @property description   Human-readable summary of the capability.
- * @property grantedAt     ISO-8601 date the entitlement was granted.
- * @property expiresAt     ISO-8601 date the entitlement expires (nullable).
  */
 export interface FeatureEntitlement {
   id: string;
@@ -77,13 +250,6 @@ export interface FeatureEntitlement {
 
 /**
  * An agent product sold through the Hivarium catalog.
- *
- * @property id          Stable, deterministic identifier (e.g. "agent_sentinel").
- * @property name        Product display name.
- * @property description Short marketing/summary text.
- * @property category    Catalog grouping key.
- * @property version     Currently-published product version.
- * @property plans       Plan tiers at which the product is offered.
  */
 export interface AgentProduct {
   id: string;
@@ -98,14 +264,7 @@ export type LicenseStatus = "active" | "expiring" | "expired" | "revoked";
 
 /**
  * A customer's license to run a specific agent product.
- *
- * @property id              Stable, deterministic identifier.
- * @property customerId      Owning customer id.
- * @property agentProductId  Licensed agent product id.
- * @property seats           Licensed seat count.
- * @property issuedAt        ISO-8601 issue date.
- * @property expiresAt       ISO-8601 expiry date (nullable).
- * @property status          Derived lifecycle state of the license.
+ * Retained for backward-compatible migration from v1 stores only.
  */
 export interface AgentLicense {
   id: string;
@@ -117,16 +276,12 @@ export interface AgentLicense {
   status: LicenseStatus;
 }
 
-/**
- * All collections the console operates on.
- */
-export interface DataStore {
-  customers: Customer[];
-  subscriptions: Subscription[];
-  featureEntitlements: FeatureEntitlement[];
-  agentProducts: AgentProduct[];
-  agentLicenses: AgentLicense[];
-}
+// ---------------------------------------------------------------------------
+// Constants and helpers
+// ---------------------------------------------------------------------------
+
+/** Current schema version for the persisted store. */
+export const STORE_SCHEMA_VERSION = 2 as const;
 
 export const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
   "evaluation",
@@ -135,11 +290,6 @@ export const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
   "churned",
 ];
 
-/**
- * Legacy status values that older persisted stores may still contain. These
- * are mapped to their current canonical form so the UI never renders a stale
- * label. (The "trial" → "evaluation" rename happened after v1 seeding.)
- */
 const LEGACY_STATUS_ALIASES: Record<string, CustomerStatus> = {
   trial: "evaluation",
   evaluation: "evaluation",
@@ -150,14 +300,9 @@ const LEGACY_STATUS_ALIASES: Record<string, CustomerStatus> = {
 
 /**
  * Coerce an arbitrary (possibly unvalidated) status value into a canonical
- * {@link CustomerStatus}. Unknown values fall back to `"evaluation"`. This is
- * the single place the "trial" → "evaluation" migration is applied, and it is
- * used by the repository whenever a store is loaded from storage so that
- * legacy localStorage payloads normalize transparently.
+ * {@link CustomerStatus}. Unknown values fall back to `"evaluation"`.
  */
-export function normalizeCustomerStatus(
-  value: unknown
-): CustomerStatus {
+export function normalizeCustomerStatus(value: unknown): CustomerStatus {
   if (typeof value !== "string") return "evaluation";
   return LEGACY_STATUS_ALIASES[value] ?? "evaluation";
 }

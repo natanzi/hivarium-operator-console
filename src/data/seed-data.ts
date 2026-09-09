@@ -1,26 +1,36 @@
 import type {
+  ActivityEvent,
+  AgentAccessGrant,
   AgentLicense,
   AgentProduct,
+  CommercialArrangement,
   Customer,
   CustomerStatus,
   DataStore,
   FeatureEntitlement,
+  MonthlyCommercialArrangement,
   PlanTier,
   Subscription,
 } from "@/domain/types";
+import { STORE_SCHEMA_VERSION } from "@/domain/types";
+import { subscriptionToMonthlyArrangement } from "@/domain/commercial-rules";
 
 /**
  * Deterministic seed data for the Hivarium Operator Console.
  *
  * All records are fictional and fully static so the app (and its tests) are
- * reproducible. Exactly six customers are seeded.
+ * reproducible. Exactly six customers are seeded. The store is authored
+ * directly in the canonical schemaVersion 2 shape: legacy `Subscription` and
+ * `AgentLicense` records are migration inputs only and are never part of the
+ * active store.
  */
 
 export interface CustomerSeed {
   customer: Customer;
-  subscriptions: Subscription[];
+  commercialArrangements: CommercialArrangement[];
+  agentAccessGrants: AgentAccessGrant[];
+  activityEvents: ActivityEvent[];
   featureEntitlements: FeatureEntitlement[];
-  agentLicenses: AgentLicense[];
 }
 
 export const PLAN_LABELS: Record<PlanTier, string> = {
@@ -106,9 +116,122 @@ export const AGENT_PRODUCTS: AgentProduct[] = [
   },
 ];
 
+/**
+ * Fixed reference "now" for the deterministic seed. All as-of projections in
+ * the demo resolve against this instant.
+ */
+export const SEED_NOW = "2026-09-09T00:00:00.000Z";
+
+// ---------------------------------------------------------------------------
+// Canonical record builders (legacy seed records are the migration inputs)
+// ---------------------------------------------------------------------------
+
+function monthlyFromSubscription(
+  subscription: Subscription
+): MonthlyCommercialArrangement {
+  return subscriptionToMonthlyArrangement(
+    {
+      id: `arr_${subscription.id}`,
+      customerId: subscription.customerId,
+      plan: subscription.plan,
+      seats: subscription.seats,
+      startedAt: subscription.startedAt,
+      renewsAt: subscription.renewsAt,
+      status: subscription.status,
+    },
+    { now: SEED_NOW }
+  );
+}
+
+function grantFromLicense(license: AgentLicense): AgentAccessGrant {
+  const revokedAt =
+    license.status === "revoked"
+      ? (license.expiresAt ?? license.issuedAt)
+      : null;
+  return {
+    id: `grant_${license.id}`,
+    customerId: license.customerId,
+    agentProductId: license.agentProductId,
+    startsAt: license.issuedAt,
+    endsAt: license.expiresAt,
+    createdAt: SEED_NOW,
+    revokedAt,
+    scheduledRevokeAt: null,
+    activityEventId: `evt_migrate_${license.id}`,
+    reasonForChange: `Migrated from legacy ${license.status} license.`,
+  };
+}
+
+function migrationEventForSubscription(
+  subscription: Subscription,
+  arrangement: MonthlyCommercialArrangement
+): ActivityEvent {
+  return {
+    id: `evt_migrate_${subscription.id}`,
+    occurredAt: SEED_NOW,
+    source: "migration",
+    type: "commercial.created",
+    customerId: subscription.customerId,
+    label: `Migrated ${subscription.plan} subscription to a monthly arrangement.`,
+    subjectId: arrangement.id,
+    resultingState: arrangement.status,
+  };
+}
+
+function migrationEventForLicense(
+  license: AgentLicense,
+  grant: AgentAccessGrant
+): ActivityEvent {
+  const revoked = license.status === "revoked";
+  return {
+    id: `evt_migrate_${license.id}`,
+    occurredAt: SEED_NOW,
+    source: "migration",
+    type: revoked ? "access.revoked" : "access.granted",
+    customerId: license.customerId,
+    label: `Migrated ${license.status} license to an agent access grant.`,
+    subjectId: grant.id,
+    subjectId2: license.agentProductId,
+    resultingState: revoked ? "revoked" : "active",
+  };
+}
+
+function seedCustomer(
+  customer: Customer,
+  featureEntitlements: FeatureEntitlement[],
+  subscriptions: Subscription[],
+  agentLicenses: AgentLicense[],
+  extraArrangements: CommercialArrangement[] = [],
+  extraEvents: ActivityEvent[] = []
+): CustomerSeed {
+  const commercialArrangements: MonthlyCommercialArrangement[] =
+    subscriptions.map(monthlyFromSubscription);
+  const agentAccessGrants: AgentAccessGrant[] =
+    agentLicenses.map(grantFromLicense);
+  const activityEvents: ActivityEvent[] = [
+    ...subscriptions.map((subscription, index) =>
+      migrationEventForSubscription(
+        subscription,
+        commercialArrangements[index]
+      )
+    ),
+    ...agentLicenses.map((license, index) =>
+      migrationEventForLicense(license, agentAccessGrants[index])
+    ),
+    ...extraEvents,
+  ];
+  return {
+    customer,
+    featureEntitlements,
+    commercialArrangements: [...commercialArrangements, ...extraArrangements],
+    agentAccessGrants,
+    activityEvents,
+  };
+}
+
 export const SEED_CUSTOMERS: CustomerSeed[] = [
-  {
-    customer: {
+  seedCustomer(
+    {
       id: "cust_northwind",
       name: "Northwind Trading",
       domain: "northwind.example",
@@ -119,7 +242,25 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         "Strategic retail account. Renewal negotiation scheduled for Q4. Careful about seat counts.",
       createdAt: "2023-03-14T09:30:00.000Z",
     },
-    subscriptions: [
+    [
+      {
+        id: "fe_northwind_sso",
+        customerId: "cust_northwind",
+        feature: "sso",
+        description: "SAML single sign-on for all agent consoles.",
+        grantedAt: "2023-03-14T09:30:00.000Z",
+        expiresAt: null,
+      },
+      {
+        id: "fe_northwind_webhooks",
+        customerId: "cust_northwind",
+        feature: "webhooks",
+        description: "Outbound webhooks for agent lifecycle events.",
+        grantedAt: "2023-04-02T10:15:00.000Z",
+        expiresAt: null,
+      },
+    ],
+    [
       {
         id: "sub_northwind_courier_growth",
         customerId: "cust_northwind",
@@ -141,32 +282,14 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         status: "active",
       },
     ],
-    featureEntitlements: [
-      {
-        id: "fe_northwind_sso",
-        customerId: "cust_northwind",
-        feature: "sso",
-        description: "SAML single sign-on for all agent consoles.",
-        grantedAt: "2023-03-14T09:30:00.000Z",
-        expiresAt: null,
-      },
-      {
-        id: "fe_northwind_webhooks",
-        customerId: "cust_northwind",
-        feature: "webhooks",
-        description: "Outbound webhooks for agent lifecycle events.",
-        grantedAt: "2023-04-02T10:15:00.000Z",
-        expiresAt: null,
-      },
-    ],
-    agentLicenses: [
+    [
       {
         id: "lic_northwind_courier",
         customerId: "cust_northwind",
         agentProductId: "agent_courier",
         seats: 25,
         issuedAt: "2023-03-14T09:30:00.000Z",
-        expiresAt: "2026-03-14T09:30:00.000Z",
+        expiresAt: "2027-03-14T09:30:00.000Z",
         status: "active",
       },
       {
@@ -175,13 +298,13 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         agentProductId: "agent_mercator",
         seats: 40,
         issuedAt: "2023-06-01T12:00:00.000Z",
-        expiresAt: "2026-06-01T12:00:00.000Z",
+        expiresAt: "2027-06-01T12:00:00.000Z",
         status: "active",
       },
-    ],
-  },
-  {
-    customer: {
+    ]
+  ),
+  seedCustomer(
+    {
       id: "cust_bluepeak",
       name: "Bluepeak Logistics",
       domain: "bluepeak.example",
@@ -192,29 +315,7 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         "High-volume logistics account. Runs Courier at scale across 12 regions; sensitive to latency SLAs.",
       createdAt: "2022-11-02T14:00:00.000Z",
     },
-    subscriptions: [
-      {
-        id: "sub_bluepeak_courier_enterprise",
-        customerId: "cust_bluepeak",
-        plan: "enterprise",
-        agentProductId: "agent_courier",
-        seats: 200,
-        startedAt: "2022-11-02T14:00:00.000Z",
-        renewsAt: "2026-11-02T14:00:00.000Z",
-        status: "active",
-      },
-      {
-        id: "sub_bluepeak_vanguard_enterprise",
-        customerId: "cust_bluepeak",
-        plan: "enterprise",
-        agentProductId: "agent_vanguard",
-        seats: 12,
-        startedAt: "2024-02-15T08:00:00.000Z",
-        renewsAt: "2026-02-15T08:00:00.000Z",
-        status: "active",
-      },
-    ],
-    featureEntitlements: [
+    [
       {
         id: "fe_bluepeak_sso",
         customerId: "cust_bluepeak",
@@ -240,7 +341,29 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         expiresAt: "2026-02-15T08:00:00.000Z",
       },
     ],
-    agentLicenses: [
+    [
+      {
+        id: "sub_bluepeak_courier_enterprise",
+        customerId: "cust_bluepeak",
+        plan: "enterprise",
+        agentProductId: "agent_courier",
+        seats: 200,
+        startedAt: "2022-11-02T14:00:00.000Z",
+        renewsAt: "2026-11-02T14:00:00.000Z",
+        status: "active",
+      },
+      {
+        id: "sub_bluepeak_vanguard_enterprise",
+        customerId: "cust_bluepeak",
+        plan: "enterprise",
+        agentProductId: "agent_vanguard",
+        seats: 12,
+        startedAt: "2024-02-15T08:00:00.000Z",
+        renewsAt: "2026-02-15T08:00:00.000Z",
+        status: "active",
+      },
+    ],
+    [
       {
         id: "lic_bluepeak_courier",
         customerId: "cust_bluepeak",
@@ -259,10 +382,10 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         expiresAt: "2026-02-15T08:00:00.000Z",
         status: "expiring",
       },
-    ],
-  },
-  {
-    customer: {
+    ]
+  ),
+  seedCustomer(
+    {
       id: "cust_sablefin",
       name: "Sable & Finch",
       domain: "sablefinch.example",
@@ -273,7 +396,17 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         "Fashion retailer evaluating Sentinel across two stores; alert-triage accuracy trial.",
       createdAt: "2026-07-28T16:20:00.000Z",
     },
-    subscriptions: [
+    [
+      {
+        id: "fe_sablefin_sso",
+        customerId: "cust_sablefin",
+        feature: "sso",
+        description: "SAML single sign-on for all agent consoles.",
+        grantedAt: "2026-07-28T16:20:00.000Z",
+        expiresAt: "2026-08-27T16:20:00.000Z",
+      },
+    ],
+    [
       {
         id: "sub_sablefin_sentinel_trial",
         customerId: "cust_sablefin",
@@ -285,17 +418,7 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         status: "trialing",
       },
     ],
-    featureEntitlements: [
-      {
-        id: "fe_sablefin_sso",
-        customerId: "cust_sablefin",
-        feature: "sso",
-        description: "SAML single sign-on for all agent consoles.",
-        grantedAt: "2026-07-28T16:20:00.000Z",
-        expiresAt: "2026-08-27T16:20:00.000Z",
-      },
-    ],
-    agentLicenses: [
+    [
       {
         id: "lic_sablefin_sentinel",
         customerId: "cust_sablefin",
@@ -305,10 +428,10 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         expiresAt: "2026-08-27T16:20:00.000Z",
         status: "expiring",
       },
-    ],
-  },
-  {
-    customer: {
+    ]
+  ),
+  seedCustomer(
+    {
       id: "cust_orbitalworks",
       name: "Orbital Works",
       domain: "orbitalworks.example",
@@ -319,29 +442,7 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         "Aerospace hardware manufacturer. Enterprise tier with Atlas for the data platform; expanding seat count in Q3.",
       createdAt: "2021-05-19T07:45:00.000Z",
     },
-    subscriptions: [
-      {
-        id: "sub_orbitalworks_atlas_enterprise",
-        customerId: "cust_orbitalworks",
-        plan: "enterprise",
-        agentProductId: "agent_atlas",
-        seats: 75,
-        startedAt: "2021-05-19T07:45:00.000Z",
-        renewsAt: "2026-05-19T07:45:00.000Z",
-        status: "active",
-      },
-      {
-        id: "sub_orbitalworks_ledger_scale",
-        customerId: "cust_orbitalworks",
-        plan: "scale",
-        agentProductId: "agent_ledger",
-        seats: 15,
-        startedAt: "2023-09-10T10:00:00.000Z",
-        renewsAt: "2026-09-10T10:00:00.000Z",
-        status: "active",
-      },
-    ],
-    featureEntitlements: [
+    [
       {
         id: "fe_orbitalworks_sso",
         customerId: "cust_orbitalworks",
@@ -375,7 +476,29 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         expiresAt: null,
       },
     ],
-    agentLicenses: [
+    [
+      {
+        id: "sub_orbitalworks_atlas_enterprise",
+        customerId: "cust_orbitalworks",
+        plan: "enterprise",
+        agentProductId: "agent_atlas",
+        seats: 75,
+        startedAt: "2021-05-19T07:45:00.000Z",
+        renewsAt: "2026-05-19T07:45:00.000Z",
+        status: "active",
+      },
+      {
+        id: "sub_orbitalworks_ledger_scale",
+        customerId: "cust_orbitalworks",
+        plan: "scale",
+        agentProductId: "agent_ledger",
+        seats: 15,
+        startedAt: "2023-09-10T10:00:00.000Z",
+        renewsAt: "2026-09-10T10:00:00.000Z",
+        status: "active",
+      },
+    ],
+    [
       {
         id: "lic_orbitalworks_atlas",
         customerId: "cust_orbitalworks",
@@ -394,10 +517,10 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         expiresAt: "2026-09-10T10:00:00.000Z",
         status: "active",
       },
-    ],
-  },
-  {
-    customer: {
+    ]
+  ),
+  seedCustomer(
+    {
       id: "cust_meridians",
       name: "Meridians Health",
       domain: "meridians.example",
@@ -408,19 +531,7 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         "Healthcare network paused during a system consolidation. Contract is valid; expect reactivation in two quarters.",
       createdAt: "2022-04-11T13:00:00.000Z",
     },
-    subscriptions: [
-      {
-        id: "sub_meridians_mercator_scale",
-        customerId: "cust_meridians",
-        plan: "scale",
-        agentProductId: "agent_mercator",
-        seats: 60,
-        startedAt: "2022-04-11T13:00:00.000Z",
-        renewsAt: "2026-04-11T13:00:00.000Z",
-        status: "cancelled",
-      },
-    ],
-    featureEntitlements: [
+    [
       {
         id: "fe_meridians_sso",
         customerId: "cust_meridians",
@@ -438,7 +549,19 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         expiresAt: null,
       },
     ],
-    agentLicenses: [
+    [
+      {
+        id: "sub_meridians_mercator_scale",
+        customerId: "cust_meridians",
+        plan: "scale",
+        agentProductId: "agent_mercator",
+        seats: 60,
+        startedAt: "2022-04-11T13:00:00.000Z",
+        renewsAt: "2026-04-11T13:00:00.000Z",
+        status: "cancelled",
+      },
+    ],
+    [
       {
         id: "lic_meridians_mercator",
         customerId: "cust_meridians",
@@ -449,9 +572,36 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         status: "expired",
       },
     ],
-  },
-  {
-    customer: {
+    [
+      {
+        id: "arr_meridians_prepaid",
+        customerId: "cust_meridians",
+        status: "active",
+        model: "prepaid",
+        currency: "USD",
+        balanceCents: 250000,
+        effectiveFrom: "2026-04-11T13:00:00.000Z",
+        effectiveTo: null,
+        expiresAt: null,
+        createdAt: "2026-04-11T13:00:00.000Z",
+        reason: "Prepaid balance loaded during the consolidation pause.",
+      },
+    ],
+    [
+      {
+        id: "evt_meridians_prepaid",
+        occurredAt: "2026-04-11T13:00:00.000Z",
+        source: "operator",
+        type: "commercial.created",
+        customerId: "cust_meridians",
+        label: "Activated prepaid balance.",
+        subjectId: "arr_meridians_prepaid",
+        resultingState: "active",
+      },
+    ]
+  ),
+  seedCustomer(
+    {
       id: "cust_greyharbor",
       name: "Grey Harbor Media",
       domain: "greyharbor.example",
@@ -462,7 +612,17 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         "Content studio churned last quarter after consolidating vendors. Closeout documentation archived.",
       createdAt: "2021-10-05T15:30:00.000Z",
     },
-    subscriptions: [
+    [
+      {
+        id: "fe_greyharbor_sso",
+        customerId: "cust_greyharbor",
+        feature: "sso",
+        description: "SAML single sign-on for all agent consoles.",
+        grantedAt: "2021-10-05T15:30:00.000Z",
+        expiresAt: null,
+      },
+    ],
+    [
       {
         id: "sub_greyharbor_mercator_growth",
         customerId: "cust_greyharbor",
@@ -474,17 +634,7 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         status: "cancelled",
       },
     ],
-    featureEntitlements: [
-      {
-        id: "fe_greyharbor_sso",
-        customerId: "cust_greyharbor",
-        feature: "sso",
-        description: "SAML single sign-on for all agent consoles.",
-        grantedAt: "2021-10-05T15:30:00.000Z",
-        expiresAt: null,
-      },
-    ],
-    agentLicenses: [
+    [
       {
         id: "lic_greyharbor_mercator",
         customerId: "cust_greyharbor",
@@ -495,21 +645,57 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         status: "revoked",
       },
     ],
-  },
+    [
+      {
+        id: "arr_greyharbor_annual",
+        customerId: "cust_greyharbor",
+        status: "ended",
+        model: "annual",
+        currency: "USD",
+        contractValueCents: 1200000,
+        effectiveFrom: "2021-10-05T15:30:00.000Z",
+        effectiveTo: "2024-10-05T15:30:00.000Z",
+        startsAt: "2021-10-05T15:30:00.000Z",
+        endsAt: "2024-10-05T15:30:00.000Z",
+        includedAllowance: 500000,
+        allowanceUnit: "tokens",
+        overageRateCents: 2,
+        createdAt: "2021-10-05T15:30:00.000Z",
+        reason: "Annual contract completed at closeout.",
+      },
+    ],
+    [
+      {
+        id: "evt_greyharbor_annual",
+        occurredAt: "2021-10-05T15:30:00.000Z",
+        source: "operator",
+        type: "commercial.created",
+        customerId: "cust_greyharbor",
+        label: "Started annual contract.",
+        subjectId: "arr_greyharbor_annual",
+        resultingState: "ended",
+      },
+    ]
+  ),
 ];
 
 /**
  * Flattened deterministic seed used by the storage repository at first boot.
+ * Conforms strictly to schemaVersion 2.
  */
 export function buildSeedStore(): DataStore {
   return {
+    schemaVersion: STORE_SCHEMA_VERSION,
     customers: SEED_CUSTOMERS.map((s) => s.customer),
-    subscriptions: SEED_CUSTOMERS.flatMap((s) => s.subscriptions),
     featureEntitlements: SEED_CUSTOMERS.flatMap(
       (s) => s.featureEntitlements
     ),
     agentProducts: [...AGENT_PRODUCTS],
-    agentLicenses: SEED_CUSTOMERS.flatMap((s) => s.agentLicenses),
+    commercialArrangements: SEED_CUSTOMERS.flatMap(
+      (s) => s.commercialArrangements
+    ),
+    agentAccessGrants: SEED_CUSTOMERS.flatMap((s) => s.agentAccessGrants),
+    activityEvents: SEED_CUSTOMERS.flatMap((s) => s.activityEvents),
   };
 }
 

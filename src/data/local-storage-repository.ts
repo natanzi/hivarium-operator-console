@@ -1,13 +1,29 @@
 import type {
+  ActivityEvent,
+  AgentAccessGrant,
   AgentLicense,
   AgentProduct,
-  DataStore,
+  CommercialArrangement,
   Customer,
   CustomerStatus,
+  DataStore,
   FeatureEntitlement,
+  LicenseStatus,
+  MonthlyCommercialArrangement,
   Subscription,
 } from "@/domain/types";
-import { normalizeCustomerStatus } from "@/domain/types";
+import { normalizeCustomerStatus, STORE_SCHEMA_VERSION } from "@/domain/types";
+import {
+  findConflictingAccessGrant,
+  planTierFromMonthlyAmountCents,
+  resolveAgentAccessStatus,
+  resolveArrangementAsOf,
+  subscriptionToMonthlyArrangement,
+  validateAgentAccessGrant,
+  validateCommercialArrangement,
+  type AgentAccessGrantInput,
+  type CommercialArrangementInput,
+} from "@/domain/commercial-rules";
 import { buildSeedStore } from "@/data/seed-data";
 
 /** In-memory + optional localStorage persistence for the demo data store. */
@@ -23,10 +39,45 @@ export interface CustomerInput {
 }
 
 /**
+ * Deterministic as-of projection of a customer's commercial arrangements.
+ *
+ * `active` is the single arrangement in force at `asOf` (or `null`), `scheduled`
+ * is the earliest future-dated successor (or `null`), and `history` is every
+ * arrangement for the customer ordered newest first.
+ */
+export interface CommercialSnapshot {
+  customerId: string;
+  asOf: string;
+  active: CommercialArrangement | null;
+  scheduled: CommercialArrangement | null;
+  history: CommercialArrangement[];
+}
+
+/**
+ * Deterministic as-of projection of a customer's agent access grants.
+ *
+ * `current` holds grants that are `active` at `asOf`, `scheduled` holds
+ * future-dated grants, and `history` holds expired/revoked grants ordered
+ * newest first.
+ */
+export interface AgentAccessSnapshot {
+  customerId: string;
+  asOf: string;
+  current: AgentAccessGrant[];
+  scheduled: AgentAccessGrant[];
+  history: AgentAccessGrant[];
+}
+
+/**
  * Repository contract.
  *
  * All methods are synchronous so that the UI can render without async
  * coordination. Mutations are persisted to localStorage when available.
+ *
+ * The commercial/access methods operate on the canonical schemaVersion 2
+ * records. `getSubscriptions` and `getAgentLicenses` are narrow compatibility
+ * projections derived from those canonical records for the pre-migration UI;
+ * they are not competing active models.
  */
 export interface HiveRepository {
   /** Whether the repository has any customers to display. */
@@ -42,7 +93,7 @@ export interface HiveRepository {
   updateCustomer(id: string, input: CustomerInput): Customer;
   deleteCustomer(id: string): void;
 
-  // --- Relationships for a customer ---------------------------------------
+  // --- Legacy compatibility projections (derived from canonical records) ---
   getSubscriptions(customerId: string): Subscription[];
   getFeatureEntitlements(customerId: string): FeatureEntitlement[];
   getAgentLicenses(customerId: string): AgentLicense[];
@@ -50,6 +101,29 @@ export interface HiveRepository {
   // --- Catalog -------------------------------------------------------------
   listAgentProducts(): AgentProduct[];
   getAgentProduct(id: string): AgentProduct | undefined;
+
+  // --- Commercial arrangements --------------------------------------------
+  listCommercialArrangements(customerId: string): CommercialArrangement[];
+  getCommercialSnapshot(
+    customerId: string,
+    asOf: string | number
+  ): CommercialSnapshot;
+  saveCommercialArrangement(
+    input: CommercialArrangementInput,
+    occurredAt: string
+  ): CommercialArrangement;
+
+  // --- Agent access grants -------------------------------------------------
+  listAgentAccessGrants(customerId: string): AgentAccessGrant[];
+  getAgentAccessSnapshot(
+    customerId: string,
+    asOf: string | number
+  ): AgentAccessSnapshot;
+  grantAgentAccess(input: AgentAccessGrantInput, occurredAt: string): AgentAccessGrant;
+
+  // --- Activity ------------------------------------------------------------
+  /** Chronological (newest first) activity events for a customer. */
+  listActivityEvents(customerId: string): ActivityEvent[];
 }
 
 export type StorageLike = Pick<
@@ -57,19 +131,346 @@ export type StorageLike = Pick<
   "getItem" | "setItem" | "removeItem" | "key" | "length"
 >;
 
+/**
+ * Storage key is intentionally kept as the original v1 key so that existing
+ * browser payloads are found and upgraded by {@link migrateStore} instead of
+ * being orphaned by a rename.
+ */
 const STORAGE_KEY = "hivarium.operator-console.store.v1";
+
+/**
+ * Fixed deterministic timestamp used by the v1 → v2 migration so that
+ * migrated records and activity events are reproducible across reads.
+ */
+const MIGRATION_TIMESTAMP = "2026-09-09T00:00:00.000Z";
+
+// ---------------------------------------------------------------------------
+// Migration helpers
+// ---------------------------------------------------------------------------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeCustomers(value: unknown): Customer[] {
+  return (asArray(value) as Customer[]).map((customer) => ({
+    ...customer,
+    status: normalizeCustomerStatus(customer.status),
+  }));
+}
+
+function migrateSubscriptions(
+  subscriptions: Subscription[],
+  existing: CommercialArrangement[]
+): CommercialArrangement[] {
+  const existingIds = new Set(existing.map((arrangement) => arrangement.id));
+  const migrated: CommercialArrangement[] = [];
+  for (const subscription of subscriptions) {
+    const id = `arr_${subscription.id}`;
+    if (existingIds.has(id)) continue;
+    migrated.push(
+      subscriptionToMonthlyArrangement(
+        {
+          id,
+          customerId: subscription.customerId,
+          plan: subscription.plan,
+          seats: subscription.seats,
+          startedAt: subscription.startedAt,
+          renewsAt: subscription.renewsAt,
+          status: subscription.status,
+        },
+        { now: MIGRATION_TIMESTAMP }
+      )
+    );
+  }
+  return migrated;
+}
+
+function migrateLicenses(
+  licenses: AgentLicense[],
+  existing: AgentAccessGrant[]
+): AgentAccessGrant[] {
+  const existingIds = new Set(existing.map((grant) => grant.id));
+  const migrated: AgentAccessGrant[] = [];
+  for (const license of licenses) {
+    const id = `grant_${license.id}`;
+    if (existingIds.has(id)) continue;
+    const revokedAt =
+      license.status === "revoked"
+        ? (license.expiresAt ?? license.issuedAt)
+        : null;
+    migrated.push({
+      id,
+      customerId: license.customerId,
+      agentProductId: license.agentProductId,
+      startsAt: license.issuedAt,
+      endsAt: license.expiresAt,
+      createdAt: MIGRATION_TIMESTAMP,
+      revokedAt,
+      scheduledRevokeAt: null,
+      activityEventId: `evt_migrate_${license.id}`,
+      reasonForChange: `Migrated from legacy ${license.status} license.`,
+    });
+  }
+  return migrated;
+}
+
+function migrateEvents(
+  subscriptions: Subscription[],
+  licenses: AgentLicense[],
+  existing: ActivityEvent[],
+  migratedArrangements: CommercialArrangement[]
+): ActivityEvent[] {
+  const existingIds = new Set(existing.map((event) => event.id));
+  const events: ActivityEvent[] = [];
+
+  const arrangementStatus = new Map(
+    migratedArrangements.map((arrangement) => [arrangement.id, arrangement.status])
+  );
+
+  for (const subscription of subscriptions) {
+    const id = `evt_migrate_${subscription.id}`;
+    if (existingIds.has(id)) continue;
+    const arrangementId = `arr_${subscription.id}`;
+    events.push({
+      id,
+      occurredAt: MIGRATION_TIMESTAMP,
+      source: "migration",
+      type: "commercial.created",
+      customerId: subscription.customerId,
+      label: `Migrated ${subscription.plan} subscription to a monthly arrangement.`,
+      subjectId: arrangementId,
+      resultingState: arrangementStatus.get(arrangementId) ?? "active",
+    });
+  }
+
+  for (const license of licenses) {
+    const id = `evt_migrate_${license.id}`;
+    if (existingIds.has(id)) continue;
+    const revoked = license.status === "revoked";
+    events.push({
+      id,
+      occurredAt: MIGRATION_TIMESTAMP,
+      source: "migration",
+      type: revoked ? "access.revoked" : "access.granted",
+      customerId: license.customerId,
+      label: `Migrated ${license.status} license to an agent access grant.`,
+      subjectId: `grant_${license.id}`,
+      subjectId2: license.agentProductId,
+      resultingState: revoked ? "revoked" : "active",
+    });
+  }
+
+  return events;
+}
+
+function normalizeV2Store(raw: Record<string, unknown>): DataStore {
+  const seed = buildSeedStore();
+  return {
+    schemaVersion: STORE_SCHEMA_VERSION,
+    customers: normalizeCustomers(raw.customers),
+    featureEntitlements: asArray(raw.featureEntitlements) as FeatureEntitlement[],
+    agentProducts:
+      asArray(raw.agentProducts).length > 0
+        ? (asArray(raw.agentProducts) as AgentProduct[])
+        : seed.agentProducts,
+    commercialArrangements: asArray(
+      raw.commercialArrangements
+    ) as CommercialArrangement[],
+    agentAccessGrants: asArray(raw.agentAccessGrants) as AgentAccessGrant[],
+    activityEvents: asArray(raw.activityEvents) as ActivityEvent[],
+  };
+}
+
+/**
+ * Upgrade an arbitrary persisted payload to the canonical schemaVersion 2
+ * {@link DataStore}. This is the only persisted-format upgrade seam.
+ *
+ * - A canonical v2 payload is normalized (customer statuses) and returned.
+ * - A legacy v1 payload keeps every customer, entitlement, and catalog
+ *   product while `Subscription` meaning becomes monthly
+ *   {@link CommercialArrangement} records and `AgentLicense` meaning becomes
+ *   {@link AgentAccessGrant} records, each with a linked migration
+ *   {@link ActivityEvent}.
+ * - Migration is deterministic and idempotent: records whose source identity
+ *   (`arr_<subId>` / `grant_<licId>`) already exists are never duplicated.
+ * - Corrupt or non-object payloads fall back to the complete deterministic
+ *   seed.
+ */
+export function migrateStore(raw: unknown): DataStore {
+  if (!isRecord(raw)) return buildSeedStore();
+
+  if (raw.schemaVersion === STORE_SCHEMA_VERSION) {
+    return normalizeV2Store(raw);
+  }
+
+  const seed = buildSeedStore();
+  const customers = normalizeCustomers(raw.customers);
+  const featureEntitlements = asArray(
+    raw.featureEntitlements
+  ) as FeatureEntitlement[];
+  const agentProducts =
+    asArray(raw.agentProducts).length > 0
+      ? (asArray(raw.agentProducts) as AgentProduct[])
+      : seed.agentProducts;
+
+  // A partial v2 payload may already carry canonical collections; keep them.
+  const existingArrangements = asArray(
+    raw.commercialArrangements
+  ) as CommercialArrangement[];
+  const existingGrants = asArray(raw.agentAccessGrants) as AgentAccessGrant[];
+  const existingEvents = asArray(raw.activityEvents) as ActivityEvent[];
+
+  const subscriptions = asArray(raw.subscriptions) as Subscription[];
+  const licenses = asArray(raw.agentLicenses) as AgentLicense[];
+
+  const migratedArrangements = migrateSubscriptions(
+    subscriptions,
+    existingArrangements
+  );
+  const migratedGrants = migrateLicenses(licenses, existingGrants);
+  const migratedEvents = migrateEvents(
+    subscriptions,
+    licenses,
+    existingEvents,
+    migratedArrangements
+  );
+
+  return {
+    schemaVersion: STORE_SCHEMA_VERSION,
+    customers,
+    featureEntitlements,
+    agentProducts,
+    commercialArrangements: [...existingArrangements, ...migratedArrangements],
+    agentAccessGrants: [...existingGrants, ...migratedGrants],
+    activityEvents: [...existingEvents, ...migratedEvents],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Record shaping helpers
+// ---------------------------------------------------------------------------
+
+function toIsoTimestamp(value: string | number): string {
+  return typeof value === "number" ? new Date(value).toISOString() : value;
+}
+
+function buildArrangementFromInput(
+  input: CommercialArrangementInput,
+  occurredAt: string
+): CommercialArrangement {
+  const base = {
+    id: input.id as string,
+    customerId: input.customerId as string,
+    status: input.status as CommercialArrangement["status"],
+    effectiveFrom: input.effectiveFrom as string,
+    effectiveTo: (input.effectiveTo as string | null) ?? null,
+    createdAt: (input.createdAt as string) ?? occurredAt,
+    reason: input.reason as string,
+  };
+  const model = input.model as CommercialArrangement["model"];
+  if (model === "monthly") {
+    return {
+      ...base,
+      model,
+      currency: "USD",
+      billingCadence: "monthly",
+      monthlyAmountCents: input.monthlyAmountCents as number,
+      renewsAt: input.renewsAt as string,
+    };
+  }
+  if (model === "prepaid") {
+    return {
+      ...base,
+      model,
+      currency: "USD",
+      balanceCents: input.balanceCents as number,
+      expiresAt: (input.expiresAt as string | null) ?? null,
+    };
+  }
+  return {
+    ...base,
+    model: "annual",
+    currency: "USD",
+    contractValueCents: input.contractValueCents as number,
+    startsAt: input.startsAt as string,
+    endsAt: input.endsAt as string,
+    includedAllowance: input.includedAllowance as number,
+    allowanceUnit: input.allowanceUnit as string,
+    overageRateCents: input.overageRateCents as number,
+  };
+}
+
+/**
+ * Narrow compatibility projection: a monthly arrangement back into the legacy
+ * `Subscription` shape. `agentProductId` and `seats` are not part of the
+ * canonical commercial model and are reported as empty/zero rather than
+ * fabricated.
+ */
+function isMonthlyArrangement(
+  arrangement: CommercialArrangement
+): arrangement is MonthlyCommercialArrangement {
+  return arrangement.model === "monthly";
+}
+
+function arrangementToSubscription(
+  arrangement: MonthlyCommercialArrangement
+): Subscription {
+  const status: Subscription["status"] =
+    arrangement.status === "terminated" || arrangement.status === "ended"
+      ? "cancelled"
+      : arrangement.status === "scheduled"
+        ? "trialing"
+        : "active";
+  return {
+    id: arrangement.id,
+    customerId: arrangement.customerId,
+    plan: planTierFromMonthlyAmountCents(arrangement.monthlyAmountCents),
+    agentProductId: "",
+    seats: 0,
+    startedAt: arrangement.effectiveFrom,
+    renewsAt: arrangement.renewsAt,
+    status,
+  };
+}
+
+/**
+ * Narrow compatibility projection: an access grant back into the legacy
+ * `AgentLicense` shape. `seats` is not part of the canonical access model and
+ * is reported as zero rather than fabricated.
+ */
+function grantToLicense(grant: AgentAccessGrant): AgentLicense {
+  const status: LicenseStatus =
+    grant.revokedAt !== null
+      ? "revoked"
+      : grant.endsAt !== null && Date.parse(grant.endsAt) < Date.now()
+        ? "expired"
+        : grant.endsAt !== null &&
+            Date.parse(grant.endsAt) < Date.now() + 30 * 86_400_000
+          ? "expiring"
+          : "active";
+  return {
+    id: grant.id,
+    customerId: grant.customerId,
+    agentProductId: grant.agentProductId,
+    seats: 0,
+    issuedAt: grant.startsAt,
+    expiresAt: grant.endsAt,
+    status,
+  };
+}
 
 /**
  * localStorage-based implementation of {@link HiveRepository}.
  *
  * The store is lazily seeded from {@link buildSeedStore} the first time it is
  * read. Subsequent reads are returned straight from localStorage so that a
- * refresh of the browser preserves the operator's changes.
- *
- * `createCustomer` writes only the new customer record to `customers`.
- * Subscriptions, feature entitlements and agent licenses are intentionally
- * not fabricated here — the operator workflow in Phase 1 intentionally
- * separates those concerns.
+ * refresh of the browser preserves the operator's changes. Legacy v1 payloads
+ * are upgraded exactly once through {@link migrateStore}.
  */
 export class LocalStorageRepository implements HiveRepository {
   private readonly key: string;
@@ -94,31 +495,14 @@ export class LocalStorageRepository implements HiveRepository {
     }
 
     try {
-      const parsed = JSON.parse(raw) as Partial<DataStore>;
-      // Normalize any legacy (or unvalidated) statuses so the UI never renders
-      // a stale label. Only re-persist when something actually changed, so we
-      // avoid a write on every read.
-      const rawCustomers = (parsed.customers ?? []) as Customer[];
-      const customers = rawCustomers.map((c) => ({
-        ...c,
-        status: normalizeCustomerStatus(c.status),
-      }));
-      if (customers.some((c, i) => c.status !== rawCustomers[i].status)) {
-        this.storage.setItem(this.key, JSON.stringify({
-          ...parsed,
-          customers,
-        }));
+      const parsed = JSON.parse(raw) as unknown;
+      const migrated = migrateStore(parsed);
+      // Re-persist only when migration actually changed the payload, so a
+      // canonical store is not rewritten on every read.
+      if (JSON.stringify(migrated) !== raw) {
+        this.storage.setItem(this.key, JSON.stringify(migrated));
       }
-      return {
-        customers,
-        subscriptions: parsed.subscriptions ?? [],
-        featureEntitlements: parsed.featureEntitlements ?? [],
-        agentProducts:
-          parsed.agentProducts && parsed.agentProducts.length > 0
-            ? parsed.agentProducts
-            : buildSeedStore().agentProducts,
-        agentLicenses: parsed.agentLicenses ?? [],
-      };
+      return migrated;
     } catch {
       const seeded = buildSeedStore();
       this.storage.setItem(this.key, JSON.stringify(seeded));
@@ -186,18 +570,29 @@ export class LocalStorageRepository implements HiveRepository {
     this.write({
       ...store,
       customers: store.customers.filter((c) => c.id !== id),
-      subscriptions: store.subscriptions.filter((s) => s.customerId !== id),
       featureEntitlements: store.featureEntitlements.filter(
         (entitlement) => entitlement.customerId !== id
       ),
-      agentLicenses: store.agentLicenses.filter(
-        (license) => license.customerId !== id
+      commercialArrangements: store.commercialArrangements.filter(
+        (arrangement) => arrangement.customerId !== id
+      ),
+      agentAccessGrants: store.agentAccessGrants.filter(
+        (grant) => grant.customerId !== id
+      ),
+      activityEvents: store.activityEvents.filter(
+        (event) => event.customerId !== id
       ),
     });
   }
 
+  // -- Legacy compatibility projections -------------------------------------
   getSubscriptions(customerId: string): Subscription[] {
-    return this.read().subscriptions.filter((s) => s.customerId === customerId);
+    return this.read()
+      .commercialArrangements.filter(
+        (arrangement) => arrangement.customerId === customerId
+      )
+      .filter(isMonthlyArrangement)
+      .map((arrangement) => arrangementToSubscription(arrangement));
   }
 
   getFeatureEntitlements(customerId: string): FeatureEntitlement[] {
@@ -207,9 +602,9 @@ export class LocalStorageRepository implements HiveRepository {
   }
 
   getAgentLicenses(customerId: string): AgentLicense[] {
-    return this.read().agentLicenses.filter(
-      (lic) => lic.customerId === customerId
-    );
+    return this.read()
+      .agentAccessGrants.filter((grant) => grant.customerId === customerId)
+      .map((grant) => grantToLicense(grant));
   }
 
   listAgentProducts(): AgentProduct[] {
@@ -218,6 +613,198 @@ export class LocalStorageRepository implements HiveRepository {
 
   getAgentProduct(id: string): AgentProduct | undefined {
     return this.read().agentProducts.find((p) => p.id === id);
+  }
+
+  // -- Commercial arrangements ----------------------------------------------
+  listCommercialArrangements(customerId: string): CommercialArrangement[] {
+    return this.read().commercialArrangements.filter(
+      (arrangement) => arrangement.customerId === customerId
+    );
+  }
+
+  getCommercialSnapshot(
+    customerId: string,
+    asOf: string | number
+  ): CommercialSnapshot {
+    const asOfIso = toIsoTimestamp(asOf);
+    const arrangements = this.listCommercialArrangements(customerId);
+    const active =
+      arrangements.find(
+        (arrangement) => resolveArrangementAsOf(arrangement, asOf) === "active"
+      ) ?? null;
+    const scheduled =
+      arrangements
+        .filter(
+          (arrangement) =>
+            resolveArrangementAsOf(arrangement, asOf) === "scheduled"
+        )
+        .sort(
+          (a, b) => Date.parse(a.effectiveFrom) - Date.parse(b.effectiveFrom)
+        )[0] ?? null;
+    const history = [...arrangements].sort(
+      (a, b) => Date.parse(b.effectiveFrom) - Date.parse(a.effectiveFrom)
+    );
+    return { customerId, asOf: asOfIso, active, scheduled, history };
+  }
+
+  saveCommercialArrangement(
+    input: CommercialArrangementInput,
+    occurredAt: string
+  ): CommercialArrangement {
+    const normalizedInput: CommercialArrangementInput = {
+      ...input,
+      createdAt: input.createdAt ?? occurredAt,
+    };
+    const validation = validateCommercialArrangement(normalizedInput);
+    if (!validation.ok) {
+      throw new Error(validation.problems.join(" "));
+    }
+
+    const store = this.read();
+    const customerId = normalizedInput.customerId as string;
+    if (!store.customers.some((c) => c.id === customerId)) {
+      throw new Error(`Customer with id "${customerId}" does not exist`);
+    }
+
+    // One-active invariant: a customer has exactly one active arrangement at
+    // a time. Replacement/termination transitions are handled by later
+    // lifecycle methods; this write only accepts a first/next arrangement.
+    const active = store.commercialArrangements.find(
+      (arrangement) =>
+        arrangement.customerId === customerId &&
+        resolveArrangementAsOf(arrangement, occurredAt) === "active"
+    );
+    if (active) {
+      throw new Error(
+        `Customer "${customerId}" already has an active commercial arrangement.`
+      );
+    }
+
+    const arrangement = buildArrangementFromInput(normalizedInput, occurredAt);
+    const event: ActivityEvent = {
+      id: `evt_${arrangement.id}`,
+      occurredAt,
+      source: "operator",
+      type: "commercial.created",
+      customerId,
+      label: `Created ${arrangement.model} commercial arrangement.`,
+      subjectId: arrangement.id,
+      resultingState: arrangement.status,
+    };
+
+    this.write({
+      ...store,
+      commercialArrangements: [...store.commercialArrangements, arrangement],
+      activityEvents: [...store.activityEvents, event],
+    });
+    return arrangement;
+  }
+
+  // -- Agent access grants --------------------------------------------------
+  listAgentAccessGrants(customerId: string): AgentAccessGrant[] {
+    return this.read().agentAccessGrants.filter(
+      (grant) => grant.customerId === customerId
+    );
+  }
+
+  getAgentAccessSnapshot(
+    customerId: string,
+    asOf: string | number
+  ): AgentAccessSnapshot {
+    const asOfIso = toIsoTimestamp(asOf);
+    const grants = this.listAgentAccessGrants(customerId);
+    const current = grants.filter(
+      (grant) => resolveAgentAccessStatus(grant, asOf) === "active"
+    );
+    const scheduled = grants.filter(
+      (grant) => resolveAgentAccessStatus(grant, asOf) === "scheduled"
+    );
+    const history = grants
+      .filter((grant) => {
+        const status = resolveAgentAccessStatus(grant, asOf);
+        return status === "expired" || status === "revoked";
+      })
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    return { customerId, asOf: asOfIso, current, scheduled, history };
+  }
+
+  grantAgentAccess(
+    input: AgentAccessGrantInput,
+    occurredAt: string
+  ): AgentAccessGrant {
+    const normalizedInput: AgentAccessGrantInput = {
+      ...input,
+      createdAt: input.createdAt ?? occurredAt,
+    };
+    const validation = validateAgentAccessGrant(normalizedInput);
+    if (!validation.ok) {
+      throw new Error(validation.problems.join(" "));
+    }
+
+    const store = this.read();
+    const customerId = normalizedInput.customerId as string;
+    const agentProductId = normalizedInput.agentProductId as string;
+    if (!store.customers.some((c) => c.id === customerId)) {
+      throw new Error(`Customer with id "${customerId}" does not exist`);
+    }
+    if (!store.agentProducts.some((p) => p.id === agentProductId)) {
+      throw new Error(
+        `Agent product with id "${agentProductId}" does not exist`
+      );
+    }
+
+    const conflict = findConflictingAccessGrant(
+      store.agentAccessGrants,
+      { customerId, agentProductId },
+      occurredAt
+    );
+    if (conflict) {
+      throw new Error(
+        `Customer "${customerId}" already has active or scheduled access to agent product "${agentProductId}".`
+      );
+    }
+
+    const grantId =
+      (normalizedInput.id as string | undefined) ??
+      `grant_${customerId}_${agentProductId}_${occurredAt}`;
+    const eventId = `evt_${grantId}`;
+    const grant: AgentAccessGrant = {
+      id: grantId,
+      customerId,
+      agentProductId,
+      startsAt: normalizedInput.startsAt as string,
+      endsAt: (normalizedInput.endsAt as string | null) ?? null,
+      createdAt: occurredAt,
+      revokedAt: null,
+      scheduledRevokeAt: null,
+      activityEventId: eventId,
+      reasonForChange: normalizedInput.reasonForChange as string,
+    };
+    const event: ActivityEvent = {
+      id: eventId,
+      occurredAt,
+      source: "operator",
+      type: "access.granted",
+      customerId,
+      label: `Granted access to agent product "${agentProductId}".`,
+      subjectId: grant.id,
+      subjectId2: agentProductId,
+      resultingState: "active",
+    };
+
+    this.write({
+      ...store,
+      agentAccessGrants: [...store.agentAccessGrants, grant],
+      activityEvents: [...store.activityEvents, event],
+    });
+    return grant;
+  }
+
+  // -- Activity ------------------------------------------------------------
+  listActivityEvents(customerId: string): ActivityEvent[] {
+    return this.read()
+      .activityEvents.filter((event) => event.customerId === customerId)
+      .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
   }
 }
 
