@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { RotateCcw, Search, UserPlus } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   CUSTOMER_STATUS_LABELS,
@@ -21,8 +22,20 @@ import { cn } from "@/lib/utils";
 import { DataTable, type DataTableColumn } from "@/data/data-table";
 import { Avatar } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layout/Layout";
+import type { HiveRepository } from "@/data/local-storage-repository";
 
 type StatusFilter = CustomerStatus | "all";
 
@@ -35,7 +48,9 @@ type StatusFilter = CustomerStatus | "all";
  */
 export function CustomersPage() {
   const repo = useRepository();
-  const customers = useMemo(() => repo.listCustomers(), [repo]);
+  const [customers, setCustomers] = useState<Customer[]>(() =>
+    repo.listCustomers()
+  );
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -237,11 +252,16 @@ export function CustomersPage() {
             >
               Edit
             </a>
+            <DeleteCustomerAction
+              customer={c}
+              repository={repo}
+              onDeleted={() => setCustomers(repo.listCustomers())}
+            />
           </div>
         ),
       },
     ];
-  }, [related]);
+  }, [related, repo]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -306,6 +326,59 @@ export function CustomersPage() {
 
       <ResetData />
     </div>
+  );
+}
+
+function DeleteCustomerAction({
+  customer,
+  repository,
+  onDeleted,
+}: {
+  customer: Customer;
+  repository: HiveRepository;
+  onDeleted: () => void;
+}) {
+  const handleDelete = () => {
+    repository.deleteCustomer(customer.id);
+    onDeleted();
+    toast.success("Customer deleted", {
+      description: `${customer.name} and its related local records were removed.`,
+    });
+  };
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <button
+          type="button"
+          onClick={(event) => event.stopPropagation()}
+          className="text-destructive text-sm hover:underline"
+          data-testid={`delete-${customer.id}`}
+        >
+          Delete
+        </button>
+      </AlertDialogTrigger>
+      <AlertDialogContent data-testid="delete-customer-dialog">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {customer.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently removes the customer and its local subscriptions,
+            feature entitlements, and agent licenses. This action cannot be
+            undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleDelete}
+            className="bg-destructive text-white hover:bg-destructive/90"
+            data-testid={`confirm-delete-${customer.id}`}
+          >
+            Delete customer
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

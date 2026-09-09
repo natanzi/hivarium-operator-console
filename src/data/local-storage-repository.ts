@@ -40,6 +40,7 @@ export interface HiveRepository {
   getCustomer(id: string): Customer | undefined;
   createCustomer(input: CustomerInput): Customer;
   updateCustomer(id: string, input: CustomerInput): Customer;
+  deleteCustomer(id: string): void;
 
   // --- Relationships for a customer ---------------------------------------
   getSubscriptions(customerId: string): Subscription[];
@@ -175,6 +176,24 @@ export class LocalStorageRepository implements HiveRepository {
       customers: store.customers.map((c) => (c.id === id ? updated : c)),
     });
     return updated;
+  }
+
+  deleteCustomer(id: string): void {
+    const store = this.read();
+    if (!store.customers.some((c) => c.id === id)) {
+      throw new Error(`Customer with id "${id}" does not exist`);
+    }
+    this.write({
+      ...store,
+      customers: store.customers.filter((c) => c.id !== id),
+      subscriptions: store.subscriptions.filter((s) => s.customerId !== id),
+      featureEntitlements: store.featureEntitlements.filter(
+        (entitlement) => entitlement.customerId !== id
+      ),
+      agentLicenses: store.agentLicenses.filter(
+        (license) => license.customerId !== id
+      ),
+    });
   }
 
   getSubscriptions(customerId: string): Subscription[] {
