@@ -1,5 +1,6 @@
 import { Boxes } from "lucide-react";
 import { useMemo } from "react";
+import { Link } from "react-router";
 
 import {
   Card,
@@ -53,27 +54,37 @@ export function AgentCatalogPage() {
 
 function AgentProductCard({ product }: { product: AgentProduct }) {
   return (
-    <Card data-testid={`agent-card-${product.id}`}>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle>{product.name}</CardTitle>
-          <Badge variant="secondary" className="tabular-nums text-xs">
-            v{product.version}
-          </Badge>
-        </div>
-        <CardDescription>{product.category}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <p className="text-foreground/90 text-sm leading-relaxed">
-          {product.description}
-        </p>
-        <div className="flex flex-wrap gap-1.5" data-testid={`agent-plans-${product.id}`}>
-          {product.plans.map((plan) => (
-            <PlanBadge key={plan} plan={plan} />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    <Link
+      to={`/agents/${product.id}`}
+      className="group focus-visible:ring-ring/50 block rounded-xl focus-visible:ring-[3px] focus-visible:outline-none"
+      data-testid={`agent-link-${product.id}`}
+      aria-label={`View ${product.name} agent details`}
+    >
+      <Card
+        data-testid={`agent-card-${product.id}`}
+        className="group-hover:border-primary/40 h-full transition-colors"
+      >
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle>{product.name}</CardTitle>
+            <Badge variant="secondary" className="tabular-nums text-xs">
+              v{product.version}
+            </Badge>
+          </div>
+          <CardDescription>{product.category}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <p className="text-foreground/90 text-sm leading-relaxed">
+            {product.description}
+          </p>
+          <div className="flex flex-wrap gap-1.5" data-testid={`agent-plans-${product.id}`}>
+            {product.plans.map((plan) => (
+              <PlanBadge key={plan} plan={plan} />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 

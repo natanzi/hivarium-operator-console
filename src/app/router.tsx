@@ -7,6 +7,7 @@ import { RepositoryProvider } from "@/data/repository-context";
 import { repository } from "@/data/local-storage-repository";
 import { AboutPage } from "@/features/about/pages/AboutPage";
 import { AgentCatalogPage } from "@/features/agents/pages/AgentCatalogPage";
+import { AgentDetailPage } from "@/features/agents/pages/AgentDetailPage";
 import { CustomersPage } from "@/features/customers/pages/CustomersPage";
 import { CreateCustomerPage } from "@/features/customers/pages/CreateCustomerPage";
 import { EditCustomerPage } from "@/features/customers/pages/EditCustomerPage";
@@ -22,6 +23,7 @@ import { CustomerProfilePage } from "@/features/customers/pages/CustomerProfileP
  *                         entitlements, licenses)
  *   /customers/:id/edit → edit customer form
  *   /agents             → read-only agent catalog
+ *   /agents/:id         → agent detail (capability + reverse customer access)
  *   /settings/about     → product information
  */
 function withLayout(
@@ -81,6 +83,14 @@ export const router = createBrowserRouter([
     element: (
       <RepositoryProvider repository={repository}>
         {withLayout(<AgentCatalogPage />)}
+      </RepositoryProvider>
+    ),
+  },
+  {
+    path: "/agents/:agentProductId",
+    element: (
+      <RepositoryProvider repository={repository}>
+        {withLayout(<AgentDetailPage />)}
       </RepositoryProvider>
     ),
   },

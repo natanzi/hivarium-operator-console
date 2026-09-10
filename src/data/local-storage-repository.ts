@@ -71,6 +71,23 @@ export interface AgentAccessSnapshot {
 }
 
 /**
+ * A single customer holding `active` or `scheduled` access to an agent
+ * product at a point in time. `status` mirrors the as-of grant state;
+ * `startsAt`, `endsAt`, and `scheduledRevokeAt` are the grant's effective
+ * dates (or `null`). The page renders active rows before scheduled rows.
+ */
+export interface AgentCustomerAccessRow {
+  customerId: string;
+  customerName: string;
+  agentProductId: string;
+  grantId: string;
+  status: "active" | "scheduled";
+  startsAt: string;
+  endsAt: string | null;
+  scheduledRevokeAt: string | null;
+}
+
+/**
  * Repository contract.
  *
  * All methods are synchronous so that the UI can render without async
@@ -103,6 +120,16 @@ export interface HiveRepository {
   // --- Catalog -------------------------------------------------------------
   listAgentProducts(): AgentProduct[];
   getAgentProduct(id: string): AgentProduct | undefined;
+  /**
+   * Deterministic reverse projection: the set of customers holding an
+   * `active` or `scheduled` access grant to `agentProductId` at `asOf`.
+   * Returns one row per grant ordered current-first (active) then scheduled,
+   * earliest effective date first. Catalog editing is intentionally absent.
+   */
+  listCustomersWithAgentAccess(
+    agentProductId: string,
+    asOf: string | number
+  ): AgentCustomerAccessRow[];
 
   // --- Commercial arrangements --------------------------------------------
   listCommercialArrangements(customerId: string): CommercialArrangement[];
@@ -433,7 +460,7 @@ function grantToLicense(grant: AgentAccessGrant): AgentLicense {
       : grant.endsAt !== null && Date.parse(grant.endsAt) < Date.now()
         ? "expired"
         : grant.endsAt !== null &&
-            Date.parse(grant.endsAt) < Date.now() + 30 * 86_400_000
+          Date.parse(grant.endsAt) < Date.now() + 30 * 86_400_000
           ? "expiring"
           : "active";
   return {
@@ -598,6 +625,42 @@ export class LocalStorageRepository implements HiveRepository {
     return this.read().agentProducts.find((p) => p.id === id);
   }
 
+  listCustomersWithAgentAccess(
+    agentProductId: string,
+    asOf: string | number
+  ): AgentCustomerAccessRow[] {
+    const asOfIso = toIsoTimestamp(asOf);
+    const rows: AgentCustomerAccessRow[] = [];
+    for (const grant of this.read().agentAccessGrants) {
+      if (grant.agentProductId !== agentProductId) continue;
+      const status = resolveAgentAccessStatus(grant, asOfIso);
+      if (status !== "active" && status !== "scheduled") continue;
+      const customer = this.read().customers.find(
+        (c) => c.id === grant.customerId
+      );
+      rows.push({
+        customerId: grant.customerId,
+        customerName: customer?.name ?? grant.customerId,
+        agentProductId: grant.agentProductId,
+        grantId: grant.id,
+        status,
+        startsAt: grant.startsAt,
+        endsAt: grant.endsAt,
+        scheduledRevokeAt: grant.scheduledRevokeAt,
+      });
+    }
+
+    // Active (current) rows before scheduled, earliest effective first.
+    rows.sort((a, b) => {
+      if (a.status !== b.status) {
+        return a.status === "active" ? -1 : 1;
+      }
+      return a.startsAt.localeCompare(b.startsAt);
+    });
+
+    return rows;
+  }
+
   // -- Commercial arrangements ----------------------------------------------
   listCommercialArrangements(customerId: string): CommercialArrangement[] {
     return this.read().commercialArrangements.filter(
@@ -679,7 +742,7 @@ export class LocalStorageRepository implements HiveRepository {
       ...store,
       commercialArrangements: store.commercialArrangements.map((a) =>
         a.id === arrangement.id
-          ? { ...a, status: "terminated", effectiveTo: occurredAt }
+          ? { ...a, status: "terminated", effectiveTo: occurredAt, reason: input.reason }
           : a
       ),
       activityEvents: [...store.activityEvents, triggerEvent],
