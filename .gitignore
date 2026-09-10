@@ -33,3 +33,4 @@ _.sln
 .cursor/
 playwright-report/
 test-results/
+.artifacts/
