@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-current_phase: 1
-current_phase_name: Customer Commercial Control
+current_phase: 2
+current_phase_name: Prepaid Credit and Usage Accounting
 status: planning
-stopped_at: Phase-01-UI-SPEC-approved
-last_updated: "2026-09-09T19:16:28.990Z"
-state_head: 4d9d8951437136319aa8758e39cb06ca3cd5b10e
+stopped_at: Phase-01-complete
+last_updated: "2026-09-10T00:00:00.000Z"
+state_head: 4ccb5aa1b246d0700ebdc52245f7b755843bdc92
 progress:
   total_phases: 3
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 3
+  completed_plans: 3
+  percent: 33
 ---
 
 # Project State
@@ -20,23 +20,25 @@ progress:
 
 **Project:** Hivarium Operator Console
 **Core value:** The operator can understand and control each customer's commercial relationship, agent access, balance, and usage from one clear and dependable profile.
-**Current focus:** Phase 1 — Customer Commercial Control
+**Current focus:** Phase 2 — Prepaid Credit and Usage Accounting
 **Mode:** MVP
 
 ## Current Position
 
-**Phase:** 1 of 3 — Customer Commercial Control
-**Plan:** Not planned
-**Status:** Roadmap created; ready for phase discussion and planning
-**Progress:** [----------] 0%
+**Phase:** 1 of 3 — Customer Commercial Control: **Complete**
+**Plan:** 3/3 plans complete (01-01, 01-02, 01-03)
+**Status:** Phase 1 complete; ready for Phase 2 discussion and planning
+**Next phase:** Phase 2 — Prepaid Credit and Usage Accounting
+**Progress:** [###-------] 33%
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases complete | 0/3 |
-| Plans complete | 0 |
-| v1 requirements complete | 0/26 |
+| Phases complete | 1/3 |
+| Plans complete | 3 |
+| v1 requirements complete | 10/26 |
+| Phase 1 requirements complete | 10/10 |
 | Requirements mapped | 26/26 |
 
 ## Accumulated Context
@@ -52,8 +54,8 @@ progress:
 
 ### Todos
 
-- Discuss and plan Phase 1.
-- Define model-transition history semantics during Phase 1 planning.
+- [x] Discuss and plan Phase 1.
+- [x] Define model-transition history semantics during Phase 1 planning.
 - Define ledger invariants and reversal rules before Phase 2 implementation.
 - Select the smallest suitable durable backend during Phase 3 planning.
 
@@ -63,13 +65,13 @@ progress:
 
 ## Session Continuity
 
-**Last session:** 2026-09-09T19:16:28.981Z
-**Stopped at:** Phase-01-UI-SPEC-approved
-**Resume file:** .planning/phases/01-customer-commercial-control/01-UI-SPEC.md
+**Last session:** 2026-09-10T00:00:00.000Z
+**Stopped at:** Phase-01-complete
+**Resume file:** .planning/phases/01-customer-commercial-control/VERIFICATION.md
 
-**Last action:** Created MVP roadmap and mapped all 26 v1 requirements.
-**Next action:** Run `$gsd-discuss-phase 1`, then `$gsd-plan-phase 1`.
-**Resume note:** Preserve the existing validated customer CRUD, confirmed delete, catalog, Cloudflare Access, and local demo behavior while adding the first vertical slice.
+**Last action:** Completed and verified Phase 1 — Customer Commercial Control (3/3 plans, 10/10 Phase 1 requirements).
+**Next action:** Run `$gsd-discuss-phase 2`, then `$gsd-plan-phase 2` for Phase 2 — Prepaid Credit and Usage Accounting.
+**Resume note:** Phase 1 is complete. Phase 2 must build prepaid credit and usage accounting on immutable ledger transactions, not an editable balance counter.
 
 ---
-*Last updated: 2026-09-09 after roadmap creation*
+*Last updated: 2026-09-10 after Phase 1 completion*

@@ -6,7 +6,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Customer Commercial Control** - Manage each customer's commercial arrangement and agent access from one coherent profile.
+- [x] **Phase 1: Customer Commercial Control** - Manage each customer's commercial arrangement and agent access from one coherent profile.
 - [ ] **Phase 2: Prepaid Credit and Usage Accounting** - Operate prepaid accounts through an explainable ledger and auditable usage statement.
 - [ ] **Phase 3: Production-Safe Customer Operations** - Preserve the completed workflows in durable, authorized, auditable storage.
 
@@ -22,7 +22,8 @@
   2. Customer profile clearly shows the active arrangement, its most relevant amount or balance, and the next renewal, expiry, or contract date.
   3. Changing a customer's commercial model leaves the previous arrangement visible as historical information.
   4. Operator can grant or revoke dated access to catalog agents and see current access from both the customer profile and agent detail view.
-**Plans**: TBD
+**Plans**: 3/3 complete (01-01, 01-02, 01-03)
+**Verification**: `.planning/phases/01-customer-commercial-control/VERIFICATION.md`
 **UI hint:** yes
 
 ### Phase 2: Prepaid Credit and Usage Accounting
@@ -57,7 +58,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Customer Commercial Control | 0/TBD | Not started | - |
+| 1. Customer Commercial Control | 3/3 | Complete | 2026-09-10 |
 | 2. Prepaid Credit and Usage Accounting | 0/TBD | Not started | - |
 | 3. Production-Safe Customer Operations | 0/TBD | Not started | - |
 
