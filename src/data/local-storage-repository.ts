@@ -14,13 +14,15 @@ import type {
 } from "@/domain/types";
 import { normalizeCustomerStatus, STORE_SCHEMA_VERSION } from "@/domain/types";
 import {
+  applyAccessRevocation,
+  applyCommercialTransition,
   findConflictingAccessGrant,
   planTierFromMonthlyAmountCents,
+  projectCommercialState,
+  reconcileCommercialLifecycle,
   resolveAgentAccessStatus,
-  resolveArrangementAsOf,
   subscriptionToMonthlyArrangement,
   validateAgentAccessGrant,
-  validateCommercialArrangement,
   type AgentAccessGrantInput,
   type CommercialArrangementInput,
 } from "@/domain/commercial-rules";
@@ -112,6 +114,24 @@ export interface HiveRepository {
     input: CommercialArrangementInput,
     occurredAt: string
   ): CommercialArrangement;
+  /**
+   * Terminate a customer's commercial arrangement at `occurredAt`. The
+   * arrangement is closed (`status: "terminated"`), every currently active
+   * agent access grant is revoked, and one triggering commercial event plus
+   * one `system`-sourced access event per grant (sharing its `causationId`)
+   * are appended in a single write.
+   */
+  terminateCommercialArrangement(
+    input: { arrangementId: string; customerId: string; reason: string },
+    occurredAt: string
+  ): CommercialArrangement;
+  /**
+   * Reconcile a customer's commercial and access lifecycle at `asOf`:
+   * activate due scheduled arrangements, close expired arrangements, and
+   * revoke any still-active grants when no active arrangement exists.
+   * Idempotent for a repeated `asOf`.
+   */
+  reconcileCommercialLifecycle(customerId: string, asOf: string): void;
 
   // --- Agent access grants -------------------------------------------------
   listAgentAccessGrants(customerId: string): AgentAccessGrant[];
@@ -120,6 +140,15 @@ export interface HiveRepository {
     asOf: string | number
   ): AgentAccessSnapshot;
   grantAgentAccess(input: AgentAccessGrantInput, occurredAt: string): AgentAccessGrant;
+  /**
+   * Revoke an agent access grant immediately or on an explicit future date.
+   * The grant record is retained and marked `revokedAt`/`scheduledRevokeAt`
+   * rather than deleted.
+   */
+  revokeAgentAccess(
+    input: { grantId: string; customerId: string; reason: string; effectiveAt?: string },
+    occurredAt: string
+  ): AgentAccessGrant;
 
   // --- Activity ------------------------------------------------------------
   /** Chronological (newest first) activity events for a customer. */
@@ -359,52 +388,6 @@ function toIsoTimestamp(value: string | number): string {
   return typeof value === "number" ? new Date(value).toISOString() : value;
 }
 
-function buildArrangementFromInput(
-  input: CommercialArrangementInput,
-  occurredAt: string
-): CommercialArrangement {
-  const base = {
-    id: input.id as string,
-    customerId: input.customerId as string,
-    status: input.status as CommercialArrangement["status"],
-    effectiveFrom: input.effectiveFrom as string,
-    effectiveTo: (input.effectiveTo as string | null) ?? null,
-    createdAt: (input.createdAt as string) ?? occurredAt,
-    reason: input.reason as string,
-  };
-  const model = input.model as CommercialArrangement["model"];
-  if (model === "monthly") {
-    return {
-      ...base,
-      model,
-      currency: "USD",
-      billingCadence: "monthly",
-      monthlyAmountCents: input.monthlyAmountCents as number,
-      renewsAt: input.renewsAt as string,
-    };
-  }
-  if (model === "prepaid") {
-    return {
-      ...base,
-      model,
-      currency: "USD",
-      balanceCents: input.balanceCents as number,
-      expiresAt: (input.expiresAt as string | null) ?? null,
-    };
-  }
-  return {
-    ...base,
-    model: "annual",
-    currency: "USD",
-    contractValueCents: input.contractValueCents as number,
-    startsAt: input.startsAt as string,
-    endsAt: input.endsAt as string,
-    includedAllowance: input.includedAllowance as number,
-    allowanceUnit: input.allowanceUnit as string,
-    overageRateCents: input.overageRateCents as number,
-  };
-}
-
 /**
  * Narrow compatibility projection: a monthly arrangement back into the legacy
  * `Subscription` shape. `agentProductId` and `seats` are not part of the
@@ -628,76 +611,108 @@ export class LocalStorageRepository implements HiveRepository {
   ): CommercialSnapshot {
     const asOfIso = toIsoTimestamp(asOf);
     const arrangements = this.listCommercialArrangements(customerId);
-    const active =
-      arrangements.find(
-        (arrangement) => resolveArrangementAsOf(arrangement, asOf) === "active"
-      ) ?? null;
-    const scheduled =
-      arrangements
-        .filter(
-          (arrangement) =>
-            resolveArrangementAsOf(arrangement, asOf) === "scheduled"
-        )
-        .sort(
-          (a, b) => Date.parse(a.effectiveFrom) - Date.parse(b.effectiveFrom)
-        )[0] ?? null;
-    const history = [...arrangements].sort(
-      (a, b) => Date.parse(b.effectiveFrom) - Date.parse(a.effectiveFrom)
-    );
-    return { customerId, asOf: asOfIso, active, scheduled, history };
+    const projection = projectCommercialState(arrangements, asOf);
+    return {
+      customerId,
+      asOf: asOfIso,
+      active: projection.active,
+      scheduled: projection.scheduled,
+      history: projection.history,
+    };
   }
 
   saveCommercialArrangement(
     input: CommercialArrangementInput,
     occurredAt: string
   ): CommercialArrangement {
-    const normalizedInput: CommercialArrangementInput = {
-      ...input,
-      createdAt: input.createdAt ?? occurredAt,
-    };
-    const validation = validateCommercialArrangement(normalizedInput);
-    if (!validation.ok) {
-      throw new Error(validation.problems.join(" "));
-    }
-
     const store = this.read();
-    const customerId = normalizedInput.customerId as string;
+    const customerId = input.customerId as string;
     if (!store.customers.some((c) => c.id === customerId)) {
       throw new Error(`Customer with id "${customerId}" does not exist`);
     }
 
-    // One-active invariant: a customer has exactly one active arrangement at
-    // a time. Replacement/termination transitions are handled by later
-    // lifecycle methods; this write only accepts a first/next arrangement.
-    const active = store.commercialArrangements.find(
-      (arrangement) =>
-        arrangement.customerId === customerId &&
-        resolveArrangementAsOf(arrangement, occurredAt) === "active"
+    // The pure transition validates the input, applies immediate/scheduled
+    // replacement semantics (closing the current effective range and setting
+    // replacedByArrangementId), and produces one atomic store write.
+    const result = applyCommercialTransition(store, input, occurredAt);
+    this.write(result.store);
+    return result.arrangement;
+  }
+
+  terminateCommercialArrangement(
+    input: { arrangementId: string; customerId: string; reason: string },
+    occurredAt: string
+  ): CommercialArrangement {
+    const store = this.read();
+    const arrangement = store.commercialArrangements.find(
+      (a) => a.id === input.arrangementId && a.customerId === input.customerId
     );
-    if (active) {
+    if (!arrangement) {
       throw new Error(
-        `Customer "${customerId}" already has an active commercial arrangement.`
+        `Commercial arrangement with id "${input.arrangementId}" does not exist.`
+      );
+    }
+    if (typeof input.reason !== "string" || input.reason.trim().length === 0) {
+      throw new Error("reason is required.");
+    }
+    if (arrangement.status === "terminated") {
+      throw new Error(
+        `Commercial arrangement "${input.arrangementId}" is already terminated.`
       );
     }
 
-    const arrangement = buildArrangementFromInput(normalizedInput, occurredAt);
-    const event: ActivityEvent = {
-      id: `evt_${arrangement.id}`,
+    const triggerEventId = `evt_${arrangement.id}_terminated`;
+    const triggerEvent: ActivityEvent = {
+      id: triggerEventId,
       occurredAt,
       source: "operator",
-      type: "commercial.created",
-      customerId,
-      label: `Created ${arrangement.model} commercial arrangement.`,
+      type: "commercial.terminated",
+      customerId: input.customerId,
+      label: `Terminated ${arrangement.model} commercial arrangement.`,
       subjectId: arrangement.id,
-      resultingState: arrangement.status,
+      resultingState: "terminated",
     };
 
-    this.write({
+    // Compute every affected record before the single write: the closed
+    // arrangement, each revoked grant, and the linked activity events.
+    let next: DataStore = {
       ...store,
-      commercialArrangements: [...store.commercialArrangements, arrangement],
-      activityEvents: [...store.activityEvents, event],
-    });
-    return arrangement;
+      commercialArrangements: store.commercialArrangements.map((a) =>
+        a.id === arrangement.id
+          ? { ...a, status: "terminated", effectiveTo: occurredAt }
+          : a
+      ),
+      activityEvents: [...store.activityEvents, triggerEvent],
+    };
+
+    const activeGrants = store.agentAccessGrants.filter(
+      (g) =>
+        g.customerId === input.customerId &&
+        resolveAgentAccessStatus(g, occurredAt) === "active"
+    );
+    for (const grant of activeGrants) {
+      const result = applyAccessRevocation(next, {
+        grantId: grant.id,
+        customerId: input.customerId,
+        reason: input.reason,
+        effectiveAt: occurredAt,
+        occurredAt,
+        source: "system",
+        causationId: triggerEventId,
+      });
+      next = result.store;
+    }
+
+    this.write(next);
+    return next.commercialArrangements.find((a) => a.id === arrangement.id)!;
+  }
+
+  reconcileCommercialLifecycle(customerId: string, asOf: string): void {
+    const store = this.read();
+    const result = reconcileCommercialLifecycle(store, customerId, asOf);
+    if (result.changed) {
+      this.write(result.store);
+    }
   }
 
   // -- Agent access grants --------------------------------------------------
@@ -798,6 +813,41 @@ export class LocalStorageRepository implements HiveRepository {
       activityEvents: [...store.activityEvents, event],
     });
     return grant;
+  }
+
+  revokeAgentAccess(
+    input: {
+      grantId: string;
+      customerId: string;
+      reason: string;
+      effectiveAt?: string;
+    },
+    occurredAt: string
+  ): AgentAccessGrant {
+    const store = this.read();
+    const grant = store.agentAccessGrants.find(
+      (g) => g.id === input.grantId && g.customerId === input.customerId
+    );
+    if (!grant) {
+      throw new Error(
+        `Agent access grant with id "${input.grantId}" does not exist.`
+      );
+    }
+    if (typeof input.reason !== "string" || input.reason.trim().length === 0) {
+      throw new Error("reason is required.");
+    }
+
+    const effectiveAt = input.effectiveAt ?? occurredAt;
+    const result = applyAccessRevocation(store, {
+      grantId: input.grantId,
+      customerId: input.customerId,
+      reason: input.reason,
+      effectiveAt,
+      occurredAt,
+      source: "operator",
+    });
+    this.write(result.store);
+    return result.grant;
   }
 
   // -- Activity ------------------------------------------------------------

@@ -56,6 +56,10 @@ export type CommercialArrangementStatus =
  * effective) or will start (if still `scheduled`). `effectiveTo` is optional;
  * when present, no newer arrangement may exist for the customer with an
  * `effectiveFrom` before this date.
+ *
+ * `replacedByArrangementId` is set (and never cleared) when a later,
+ * non-overlapping arrangement supersedes this record; it is the audit pointer
+ * that keeps the replaced record in history without destroying it.
  */
 export interface CommercialArrangementBase {
   id: string;
@@ -67,6 +71,12 @@ export interface CommercialArrangementBase {
   createdAt: string;
   /** Operator-provided reason (replacement, termination, etc.). */
   reason: string;
+  /**
+   * Id of the later arrangement that supersedes this one, or `null` when this
+   * record is still the effective one. Set only by a clean replacement whose
+   * effective range does not overlap this record's.
+   */
+  replacedByArrangementId: string | null;
 }
 
 /**
@@ -93,9 +103,32 @@ export interface PrepaidCommercialArrangement
   extends CommercialArrangementBase {
   model: "prepaid";
   currency: "USD";
+  /**
+   * Current monetary balance in integer cents (>= 0). This is a stored term,
+   * not a ledger balance: Phase 2 introduces the debit/adjustment ledger that
+   * will drive this value.
+   */
   balanceCents: number;
   expiresAt: string | null;
+  /** Optional operator note (e.g. the origin of a top-up). May be empty. */
+  notes?: string;
 }
+
+/**
+ * Renewal posture of an annual contract at the current instant. This is a
+ * stored term (operator-set), not a computed billing state.
+ */
+export type AnnualRenewalStatus =
+  | "renewing"
+  | "review"
+  | "non-renewing"
+  | "unknown";
+
+/**
+ * Unit of measurement for an annual contract's included allowance. An explicit
+ * union keeps the UI and rules honest; free-form text is rejected on write.
+ */
+export type AllowanceUnit = "tokens" | "seats" | "requests" | "usd" | "other";
 
 /**
  * Annual contract with an included allowance and overage rate. Detailed
@@ -105,12 +138,29 @@ export interface AnnualCommercialArrangement
   extends CommercialArrangementBase {
   model: "annual";
   currency: "USD";
+  /** Total contract value in integer cents (>= 0). */
   contractValueCents: number;
   startsAt: string;
   endsAt: string;
+  /**
+   * Renewal posture of the contract. Defaults to `"unknown"` when not yet
+   * recorded so history renders as "Not recorded" rather than a guess.
+   */
+  renewalStatus: AnnualRenewalStatus;
+  /**
+   * Operator note (renewal intent, closeout, etc.). Optional/empty when not
+   * recorded.
+   */
+  notes?: string;
+  /** Included usage allowance as a non-negative integer count. */
   includedAllowance: number;
-  allowanceUnit: string;
-  overageRateCents: number;
+  /** Unit of measurement for the included allowance. */
+  allowanceUnit: AllowanceUnit;
+  /**
+   * Overage rate in integer cents per unit (>= 0). Stored only; no overage
+   * amount is computed in this milestone.
+   */
+  overageRateCentsPerUnit: number;
 }
 
 /** Discriminated union of the three supported commercial models. */
@@ -166,7 +216,7 @@ export interface ActivityEvent {
   id: string;
   occurredAt: string;
   source: ActivitySource;
-  type: "commercial.created" | "access.granted" | "access.revoked";
+  type: "commercial.created" | "commercial.ended" | "commercial.terminated" | "access.granted" | "access.revoked";
   /** Customer id for customer-scoped events. */
   customerId: string;
   /** Human-readable action label. */

@@ -202,12 +202,15 @@ function seedCustomer(
   subscriptions: Subscription[],
   agentLicenses: AgentLicense[],
   extraArrangements: CommercialArrangement[] = [],
-  extraEvents: ActivityEvent[] = []
+  extraEvents: ActivityEvent[] = [],
+  extraGrants: AgentAccessGrant[] = []
 ): CustomerSeed {
   const commercialArrangements: MonthlyCommercialArrangement[] =
     subscriptions.map(monthlyFromSubscription);
-  const agentAccessGrants: AgentAccessGrant[] =
-    agentLicenses.map(grantFromLicense);
+  const agentAccessGrants: AgentAccessGrant[] = [
+    ...agentLicenses.map(grantFromLicense),
+    ...extraGrants,
+  ];
   const activityEvents: ActivityEvent[] = [
     ...subscriptions.map((subscription, index) =>
       migrationEventForSubscription(
@@ -582,9 +585,25 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         balanceCents: 250000,
         effectiveFrom: "2026-04-11T13:00:00.000Z",
         effectiveTo: null,
+        replacedByArrangementId: null,
         expiresAt: null,
         createdAt: "2026-04-11T13:00:00.000Z",
         reason: "Prepaid balance loaded during the consolidation pause.",
+      },
+      {
+        id: "arr_meridians_monthly_scheduled",
+        customerId: "cust_meridians",
+        status: "scheduled",
+        model: "monthly",
+        currency: "USD",
+        billingCadence: "monthly",
+        monthlyAmountCents: 14900,
+        effectiveFrom: "2026-12-01T00:00:00.000Z",
+        effectiveTo: null,
+        replacedByArrangementId: null,
+        renewsAt: "2027-12-01T00:00:00.000Z",
+        createdAt: "2026-09-01T09:00:00.000Z",
+        reason: "Scheduled migration from prepaid balance to monthly subscription.",
       },
     ],
     [
@@ -597,6 +616,41 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         label: "Activated prepaid balance.",
         subjectId: "arr_meridians_prepaid",
         resultingState: "active",
+      },
+      {
+        id: "evt_arr_meridians_monthly_scheduled",
+        occurredAt: "2026-09-01T09:00:00.000Z",
+        source: "operator",
+        type: "commercial.created",
+        customerId: "cust_meridians",
+        label: "Scheduled monthly subscription after prepaid balance.",
+        subjectId: "arr_meridians_monthly_scheduled",
+        resultingState: "scheduled",
+      },
+      {
+        id: "evt_grant_meridians_sentinel",
+        occurredAt: "2026-08-01T00:00:00.000Z",
+        source: "operator",
+        type: "access.granted",
+        customerId: "cust_meridians",
+        label: "Granted access to agent product \"agent_sentinel\".",
+        subjectId: "grant_meridians_sentinel",
+        subjectId2: "agent_sentinel",
+        resultingState: "active",
+      },
+    ],
+    [
+      {
+        id: "grant_meridians_sentinel",
+        customerId: "cust_meridians",
+        agentProductId: "agent_sentinel",
+        startsAt: "2026-08-01T00:00:00.000Z",
+        endsAt: null,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        revokedAt: null,
+        scheduledRevokeAt: "2026-10-01T00:00:00.000Z",
+        activityEventId: "evt_grant_meridians_sentinel",
+        reasonForChange: "Scheduled revocation during consolidation review.",
       },
     ]
   ),
@@ -655,13 +709,30 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         contractValueCents: 1200000,
         effectiveFrom: "2021-10-05T15:30:00.000Z",
         effectiveTo: "2024-10-05T15:30:00.000Z",
+        replacedByArrangementId: null,
         startsAt: "2021-10-05T15:30:00.000Z",
         endsAt: "2024-10-05T15:30:00.000Z",
+        renewalStatus: "non-renewing",
         includedAllowance: 500000,
         allowanceUnit: "tokens",
-        overageRateCents: 2,
+        overageRateCentsPerUnit: 2,
         createdAt: "2021-10-05T15:30:00.000Z",
         reason: "Annual contract completed at closeout.",
+      },
+      {
+        id: "arr_greyharbor_monthly_terminated",
+        customerId: "cust_greyharbor",
+        status: "terminated",
+        model: "monthly",
+        currency: "USD",
+        billingCadence: "monthly",
+        monthlyAmountCents: 14900,
+        effectiveFrom: "2024-10-05T15:30:00.000Z",
+        effectiveTo: "2025-06-01T00:00:00.000Z",
+        replacedByArrangementId: null,
+        renewsAt: "2025-06-01T00:00:00.000Z",
+        createdAt: "2024-10-05T15:30:00.000Z",
+        reason: "Terminated during vendor consolidation.",
       },
     ],
     [
@@ -674,6 +745,43 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         label: "Started annual contract.",
         subjectId: "arr_greyharbor_annual",
         resultingState: "ended",
+      },
+      {
+        id: "evt_arr_greyharbor_monthly_terminated",
+        occurredAt: "2025-06-01T00:00:00.000Z",
+        source: "operator",
+        type: "commercial.terminated",
+        customerId: "cust_greyharbor",
+        label: "Terminated monthly commercial arrangement.",
+        subjectId: "arr_greyharbor_monthly_terminated",
+        resultingState: "terminated",
+      },
+      {
+        id: "evt_grant_greyharbor_sentinel_revoked",
+        occurredAt: "2025-06-01T00:00:00.000Z",
+        source: "system",
+        type: "access.revoked",
+        customerId: "cust_greyharbor",
+        label:
+          "Access revoked automatically because no commercial arrangement is active.",
+        subjectId: "grant_greyharbor_sentinel",
+        subjectId2: "agent_sentinel",
+        resultingState: "revoked",
+        causationId: "evt_arr_greyharbor_monthly_terminated",
+      },
+    ],
+    [
+      {
+        id: "grant_greyharbor_sentinel",
+        customerId: "cust_greyharbor",
+        agentProductId: "agent_sentinel",
+        startsAt: "2024-10-05T15:30:00.000Z",
+        endsAt: null,
+        createdAt: "2024-10-05T15:30:00.000Z",
+        revokedAt: "2025-06-01T00:00:00.000Z",
+        scheduledRevokeAt: null,
+        activityEventId: "evt_grant_greyharbor_sentinel",
+        reasonForChange: "Revoked automatically after arrangement termination.",
       },
     ]
   ),
