@@ -31,3 +31,5 @@ _.sln
 .coder-stack/
 .agents/
 .cursor/
+playwright-report/
+test-results/
