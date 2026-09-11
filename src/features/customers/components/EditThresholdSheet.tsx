@@ -90,7 +90,10 @@ export function EditThresholdSheet({
     // is disabled before the synchronous repository write.
     await new Promise((resolve) => setTimeout(resolve, 0));
     try {
-      repo.updateWarningThreshold(customer.id, Number(values.thresholdTokens));
+      await repo.updateWarningThreshold(
+        customer.id,
+        Number(values.thresholdTokens)
+      );
       toast.success("Warning threshold updated");
       onSaved();
       onOpenChange(false);

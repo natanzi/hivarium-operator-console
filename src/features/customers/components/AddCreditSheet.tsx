@@ -140,7 +140,7 @@ export function AddCreditSheet({
     // is disabled before the synchronous repository write.
     await new Promise((resolve) => setTimeout(resolve, 0));
     try {
-      repo.addCreditGrant(
+      await repo.addCreditGrant(
         {
           customerId: customer.id,
           amountTokens: amount,

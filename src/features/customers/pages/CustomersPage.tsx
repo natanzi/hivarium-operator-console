@@ -115,8 +115,8 @@ export function CustomersPage() {
         q.length === 0
           ? true
           : c.name.toLowerCase().includes(q) ||
-            c.domain.toLowerCase().includes(q) ||
-            c.contact.toLowerCase().includes(q)
+          c.domain.toLowerCase().includes(q) ||
+          c.contact.toLowerCase().includes(q)
       )
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [customers, search, status]);
@@ -294,7 +294,7 @@ export function CustomersPage() {
         id: "actions",
         header: "Actions",
         cell: (c) => (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
             <a
               href={`/customers/${c.id}`}
               onClick={(e) => e.stopPropagation()}

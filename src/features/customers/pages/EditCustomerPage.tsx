@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, Save } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -78,16 +78,20 @@ export function EditCustomerPage() {
     void load();
   }, [load]);
 
-  const form = useForm<CustomerFormValues>({
-    resolver: zodResolver(customerSchema),
-    values: customer ? {
+  const formValues = useMemo(() => {
+    return customer ? {
       name: customer.name ?? "",
       domain: customer.domain ?? "",
       contact: customer.contact ?? "",
       email: customer.email ?? "",
       status: customer.status ?? "evaluation",
       notes: customer.notes ?? "",
-    } : undefined,
+    } : undefined;
+  }, [customer]);
+
+  const form = useForm<CustomerFormValues>({
+    resolver: zodResolver(customerSchema),
+    values: formValues,
     defaultValues: {
       name: "",
       domain: "",
@@ -187,7 +191,7 @@ export function EditCustomerPage() {
           <Form {...form}>
             <form
               className="flex flex-col gap-5"
-              onSubmit={form.handleSubmit(onSubmit, (errs) => console.log('EDIT VALIDATION ERRORS:', errs))}
+              onSubmit={form.handleSubmit(onSubmit)}
               noValidate
             >
               <FormField
@@ -225,10 +229,12 @@ export function EditCustomerPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Status *</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={(val) => { if (val) field.onChange(val); }} value={field.value || "evaluation"}>
                         <FormControl>
                           <SelectTrigger data-testid="status-trigger">
-                            <SelectValue placeholder="Select a status" />
+                            <SelectValue placeholder="Select a status">
+                              {CUSTOMER_STATUS_LABELS[(field.value || "evaluation") as CustomerStatus]}
+                            </SelectValue>
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>

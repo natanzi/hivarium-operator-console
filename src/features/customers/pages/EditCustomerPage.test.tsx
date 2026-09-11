@@ -71,4 +71,35 @@ describe("EditCustomerPage", () => {
       expect(updated?.name).toBe("Northwind Trading Co.");
     });
   });
+
+  it("handles asynchronous status loading and preserves it during edits without clearing", async () => {
+    // 1. Initial async load provides "evaluation" (via seed-data cust_stark is active, whatever it is we test it)
+    renderEditPage("cust_northwind");
+
+    // Wait for the form to populate from the repository
+    const submitBtn = await screen.findByTestId("submit-customer");
+
+    // The status should be correctly seeded into the form via value={field.value}
+    // "cust_northwind" status in seed data is "active". Wait for RHF reset to propagate.
+    const statusTrigger = screen.getByTestId("status-trigger");
+    await waitFor(() => {
+      expect(statusTrigger.textContent).toMatch(/Active/i);
+    });
+
+    // 2. Editing another field does not clear the status
+    const nameInput = screen.getByLabelText(/Company name/i);
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Modified Northwind");
+
+    // Click submit without touching status
+    await userEvent.click(submitBtn);
+
+    // Give it a moment to update repository
+    await new Promise((r) => setTimeout(r, 100));
+
+    // 3. Status must be preserved as "active", not empty string
+    const updated = await repository.getCustomer("cust_northwind");
+    expect(updated?.name).toBe("Modified Northwind");
+    expect(updated?.status).toBe("active");
+  });
 });

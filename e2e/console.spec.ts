@@ -62,7 +62,7 @@ test.describe("Hivarium Operator Console E2E", () => {
         await expect(page).toHaveURL(/\/customers\/cust_bluepeak\/edit$/);
         await expect(page.getByTestId("page-title")).toHaveText("Edit Bluepeak Logistics");
 
-        await page.getByLabel("Contact name").fill("Space Contact");
+        await page.getByLabel(/Contact name/i).fill("Space Contact");
         await page.getByTestId("submit-customer").click();
 
         await expect(page).toHaveURL(/\/customers\/cust_bluepeak$/);
@@ -70,12 +70,12 @@ test.describe("Hivarium Operator Console E2E", () => {
         await expect(page.getByTestId("panel-overview")).toContainText("Space Contact");
     });
 
-    test("operator creates a customer and deletes it with confirmation", async ({ page }) => {
+    test("operator creates a customer and archives it with confirmation", async ({ page }) => {
         await page.goto("/customers/new");
-        await page.getByLabel("Company name").fill("E2E Rocket Co");
-        await page.getByLabel("Email domain").fill("e2erocket.example");
-        await page.getByLabel("Contact name").fill("Ada Lovelace");
-        await page.getByLabel("Contact email").fill("ada@e2erocket.example");
+        await page.getByLabel(/Company name/i).fill("E2E Rocket Co");
+        await page.getByLabel(/Email domain/i).fill("e2erocket.example");
+        await page.getByLabel(/Contact name/i).fill("Ada Lovelace");
+        await page.getByLabel(/Contact email/i).fill("ada@e2erocket.example");
         await page.getByTestId("submit-customer").click();
 
         await expect(page).toHaveURL(/\/customers\/cust_e2e_rocket_co$/);
@@ -86,14 +86,32 @@ test.describe("Hivarium Operator Console E2E", () => {
         await page.getByTestId("customer-search").fill("E2E Rocket");
         await expect(page.getByTestId("customer-row-cust_e2e_rocket_co")).toBeVisible();
 
-        await page.getByTestId("delete-cust_e2e_rocket_co").click();
-        const dialog = page.getByTestId("delete-customer-dialog");
+        // 1. One click never archives immediately.
+        await page.getByTestId("archive-cust_e2e_rocket_co").click();
+        const dialog = page.getByTestId("archive-customer-dialog");
         await expect(dialog).toBeVisible();
-        await expect(dialog).toContainText("Delete E2E Rocket Co?");
-        await expect(dialog).toContainText("This action cannot be undone.");
+        await expect(dialog).toContainText("Archive E2E Rocket Co?");
+        await expect(dialog).toContainText("All contracts, agent-access history, ledger transactions, and usage records will be retained and remain available. The customer will leave the working list.");
 
-        await page.getByTestId("confirm-delete-cust_e2e_rocket_co").click();
-        await expect(page.getByTestId("customer-row-cust_e2e_rocket_co")).toHaveCount(0);
+        // 2. Cancel preserves the customer
+        await page.getByRole("button", { name: /Cancel/i }).click();
+        await expect(dialog).toBeHidden();
+        await expect(page.getByTestId("archive-cust_e2e_rocket_co")).toBeFocused();
+        await expect(page.getByTestId("customer-row-cust_e2e_rocket_co")).toBeVisible();
+
+        // 3. Confirmation archives the customer
+        await page.getByTestId("archive-cust_e2e_rocket_co").click();
+        await page.getByTestId("confirm-archive-cust_e2e_rocket_co").click();
+        await expect(page.getByTestId("customer-row-cust_e2e_rocket_co")).toHaveCount(0); // hidden from default list
+
+        // 4. Archived customer remains accessible (direct URL)
+        await page.goto("/customers/cust_e2e_rocket_co");
+        await expect(page.getByTestId("page-title")).toHaveText("E2E Rocket Co");
+        await expect(page.getByText("Archived", { exact: true })).toBeVisible();
+
+        // 5. Prohibited new mutations are unavailable
+        await expect(page.getByTestId("edit-customer-button")).toHaveCount(0);
+        await expect(page.getByTestId("record-usage-button")).toHaveCount(0);
     });
 
     // -------------------------------------------------------------------------

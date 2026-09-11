@@ -22,7 +22,8 @@
   // carried inside the JWT itself.
   "vars": {
     "ACCESS_TEAM_DOMAIN": "example.cloudflareaccess.com",
-    "ACCESS_AUD": "replace-with-access-application-aud"
+    "ACCESS_AUD": "replace-with-access-application-aud",
+    "AUTHORIZED_OPERATOR_EMAIL": "operator@hivarium.test"
   },
   // Resolve the SPA's "@/*" import alias inside the Worker bundle so the
   // shared domain rules and deterministic seed can be imported by relative

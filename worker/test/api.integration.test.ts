@@ -14,7 +14,7 @@
  */
 import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import schemaSql from "../migrations/0001_initial.sql?raw";
+import schemaSql from "../../migrations/0001_initial.sql?raw";
 import {
   buildAuditEntry,
   commitStoreDiff,

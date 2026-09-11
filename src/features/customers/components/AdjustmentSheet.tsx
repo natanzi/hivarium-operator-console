@@ -183,7 +183,7 @@ export function AdjustmentSheet({
     // is disabled before the synchronous repository write.
     await new Promise((resolve) => setTimeout(resolve, 0));
     try {
-      repo.addManualAdjustment(
+      await repo.addManualAdjustment(
         {
           customerId: customer.id,
           amountTokens: signedAmount,
