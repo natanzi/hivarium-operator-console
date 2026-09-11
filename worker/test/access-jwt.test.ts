@@ -93,6 +93,7 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({
@@ -116,6 +117,7 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({ ok: false, reason: "invalid-signature" });
@@ -131,6 +133,7 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({ ok: false, reason: "invalid-signature" });
@@ -145,6 +148,7 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({ ok: false, reason: "expired" });
@@ -159,6 +163,7 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({ ok: false, reason: "not-yet-valid" });
@@ -173,6 +178,7 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({ ok: false, reason: "wrong-issuer" });
@@ -187,6 +193,7 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({ ok: false, reason: "wrong-audience" });
@@ -230,9 +237,25 @@ describe("verifyAccessJwt", () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       now: NOW,
+      authorizedEmails: ['operator@hivarium.test'],
     });
 
     expect(result).toEqual({ ok: false, reason: "malformed-token" });
+  });
+
+  it("fails closed when authorizedEmails is empty", async () => {
+    const { jwks, sign } = await createTestSigner();
+    const token = await sign(validClaims());
+
+    const result = await verifyAccessJwt(token, {
+      jwks,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      now: NOW,
+      authorizedEmails: [],
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unauthorized-email" });
   });
 });
 
@@ -243,7 +266,7 @@ describe("authenticateRequest", () => {
 
     const result = await authenticateRequest(
       request,
-      { teamDomain: TEAM_DOMAIN, audience: AUDIENCE, now: NOW },
+      { teamDomain: TEAM_DOMAIN, audience: AUDIENCE, now: NOW, authorizedEmails: ['operator@hivarium.test'] },
       { get: async () => jwks }
     );
 
@@ -258,7 +281,7 @@ describe("authenticateRequest", () => {
 
     const result = await authenticateRequest(
       request,
-      { teamDomain: TEAM_DOMAIN, audience: AUDIENCE, now: NOW },
+      { teamDomain: TEAM_DOMAIN, audience: AUDIENCE, now: NOW, authorizedEmails: ['operator@hivarium.test'] },
       { get: async () => jwks }
     );
 
@@ -274,7 +297,7 @@ describe("authenticateRequest", () => {
 
     const result = await authenticateRequest(
       request,
-      { teamDomain: TEAM_DOMAIN, audience: AUDIENCE, now: NOW },
+      { teamDomain: TEAM_DOMAIN, audience: AUDIENCE, now: NOW, authorizedEmails: ['operator@hivarium.test'] },
       { get: async () => jwks }
     );
 

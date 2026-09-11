@@ -79,6 +79,8 @@ export interface Env {
   ACCESS_TEAM_DOMAIN: string;
   /** Access application AUD carried in the JWT `aud` claim. */
   ACCESS_AUD: string;
+  /** Restricts access to exactly this email (Plan 03-01 authorization requirement). */
+  AUTHORIZED_OPERATOR_EMAIL: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,6 +1196,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   const auth = await authenticateRequest(request, {
     teamDomain: env.ACCESS_TEAM_DOMAIN,
     audience: env.ACCESS_AUD,
+    authorizedEmails: [env.AUTHORIZED_OPERATOR_EMAIL],
   });
   if (!auth.ok) {
     return errorResponse(401, "unauthorized", auth.reason);

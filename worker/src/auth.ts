@@ -66,12 +66,10 @@ export interface VerifyAccessJwtOptions {
   /** Current time in milliseconds since the epoch (passed in for tests). */
   now: number;
   /**
-   * Optional allowlist of operator emails. When provided (and non-empty), a
-   * verified token whose `email` claim is not listed is rejected with
-   * `unauthorized-email`. When omitted, every verified Access identity is
-   * accepted (Cloudflare Access remains the perimeter).
+   * Required allowlist of operator emails. If omitted or empty, verification
+   * fails closed in Plan 03-01.
    */
-  authorizedEmails?: readonly string[];
+  authorizedEmails: readonly string[];
 }
 
 const B64_ALPHABET =
@@ -206,10 +204,14 @@ export async function verifyAccessJwt(
     return { ok: false, reason: "malformed-token" };
   }
   if (
-    options.authorizedEmails !== undefined &&
-    options.authorizedEmails.length > 0 &&
-    (typeof payload.email !== "string" ||
-      !options.authorizedEmails.includes(payload.email))
+    !options.authorizedEmails ||
+    options.authorizedEmails.length === 0
+  ) {
+    return { ok: false, reason: "unauthorized-email" };
+  }
+  if (
+    typeof payload.email !== "string" ||
+    !options.authorizedEmails.includes(payload.email)
   ) {
     return { ok: false, reason: "unauthorized-email" };
   }
@@ -286,11 +288,9 @@ export interface AccessJwtConfig {
   /** Optional explicit current time (ms) for deterministic tests. */
   now?: number;
   /**
-   * Optional allowlist of operator emails. When provided (and non-empty), a
-   * verified token whose `email` claim is not listed is rejected with
-   * `unauthorized-email`.
+   * Required allowlist of operator emails.
    */
-  authorizedEmails?: readonly string[];
+  authorizedEmails: readonly string[];
 }
 
 /**
