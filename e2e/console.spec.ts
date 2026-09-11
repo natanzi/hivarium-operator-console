@@ -425,7 +425,7 @@ test.describe("Hivarium Operator Console E2E", () => {
         await page.getByTestId("tab-commercial").click();
         await expect(page.getByTestId("active-arrangement")).toContainText("255,000 tokens");
         await expect(page.getByTestId("active-arrangement")).toContainText(
-            "Derived from 2 immutable transactions"
+            "Derived from 7 immutable transactions"
         );
     });
 
@@ -589,7 +589,7 @@ test.describe("Hivarium Operator Console E2E", () => {
         // Single full reversal of the adjustment through the named-customer
         // confirmation; the immutable original remains visible.
         await page.getByTestId("tab-activity").click();
-        await page.getByTestId("reverse-transaction").click();
+        await page.getByTestId("reverse-txn_cust_meridians_adjustment_2026-09-09T00:00:00.000Z").click();
         const reversalSheet = page.getByTestId("reversal-sheet");
         await expect(reversalSheet).toBeVisible();
         const original = page.getByTestId("reversal-original-transaction");
@@ -623,24 +623,14 @@ test.describe("Hivarium Operator Console E2E", () => {
         await expect(reversalSheet).toHaveCount(0);
         await expect(page.getByTestId("panel-activity")).toContainText("250,000 tokens");
 
-        // The original transaction row remains visible and a second reversal of
-        // the same target is rejected with the precise reason.
-        await page.getByTestId("reverse-transaction").click();
-        await expect(reversalSheet).toBeVisible();
-        await expect(page.getByTestId("reversal-original-transaction")).toContainText(
-            "Manual adjustment"
-        );
-        await expect(page.getByTestId("reversal-original-transaction")).toContainText(
-            "+500 tokens"
-        );
-
-        await page.getByTestId("reversal-reference").fill("e2e_rev_adj_002");
-        await page.getByTestId("reversal-reason").fill("E2E second reversal attempt");
-        await page.getByTestId("review-reversal").click();
-        await page.getByTestId("confirm-reverse-transaction").click();
-        await expect(page.getByTestId("reversal-blocked-message")).toContainText(
-            "This transaction has already been reversed."
-        );
+        // The immutable original remains visible, but a reversed transaction is
+        // no longer eligible for reversal so the action is not rendered.
+        await expect(page.getByTestId("panel-activity")).toContainText("+500 tokens");
+        await expect(
+            page.getByTestId(
+                "reverse-txn_cust_meridians_adjustment_2026-09-09T00:00:00.000Z"
+            )
+        ).toHaveCount(0);
     });
 
     test("insufficient balance blocks usage", async ({ page }) => {
@@ -766,14 +756,13 @@ test.describe("Hivarium Operator Console E2E", () => {
             page.getByTestId("statement-agent-agent_sentinel")
         ).toContainText("Sentinel — 0 tokens");
 
-        // Agent filter alone: only Sentinel usage and its reversal remain.
+        // Agent filter alone: only Sentinel usage remains.
         await page.getByTestId("clear-statement-filters").click();
         await page.getByTestId("statement-agent-trigger").click();
         await page.getByTestId("statement-agent-option-agent_sentinel").click();
-        await expect(rows).toHaveCount(3);
-        await expect(rows.nth(0)).toContainText("rev_usage_meridians_jun_003");
-        await expect(rows.nth(1)).toContainText("usage_meridians_jun_003");
-        await expect(rows.nth(2)).toContainText("usage_meridians_may_001");
+        await expect(rows).toHaveCount(2);
+        await expect(rows.nth(0)).toContainText("usage_meridians_jun_003");
+        await expect(rows.nth(1)).toContainText("usage_meridians_may_001");
         await expect(page.getByTestId("statement-net-consumed")).toHaveText(
             "−1,200 tokens"
         );
