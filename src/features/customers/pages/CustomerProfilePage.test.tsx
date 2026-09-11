@@ -138,7 +138,7 @@ describe("CustomerProfilePage", () => {
     renderProfilePath("/customers/cust_meridians");
     const band = screen.getByTestId("overview-summary-band");
     expect(band).toHaveTextContent("Prepaid");
-    expect(band).toHaveTextContent("$2500.00 balance");
+    expect(band).toHaveTextContent("250,000 tokens");
     expect(band).toHaveTextContent(/Scheduled change (Dec 1|Nov 30), 2026/);
   });
 
@@ -183,9 +183,11 @@ describe("CustomerProfilePage", () => {
     await user.click(screen.getByTestId("tab-commercial"));
     const card = screen.getByTestId("active-arrangement");
     expect(card).toHaveTextContent("Prepaid");
-    expect(card).toHaveTextContent("$2500.00");
+    expect(card).toHaveTextContent("250,000 tokens");
     expect(card).toHaveTextContent("No expiry");
-    expect(card).toHaveTextContent("Added in Phase 2");
+    expect(card).toHaveTextContent(
+      "Prepaid balance loaded during the consolidation pause."
+    );
   });
 
   it("shows the scheduled change strip with Review action", async () => {
@@ -315,7 +317,6 @@ describe("CustomerProfilePage", () => {
 
     await openCommercialSheet(user);
     await user.click(screen.getByLabelText(/Prepaid/));
-    await user.type(screen.getByTestId("prepaid-balance"), "500");
     await user.type(
       screen.getByTestId("arrangement-reason"),
       "Prepaid load"
@@ -332,7 +333,7 @@ describe("CustomerProfilePage", () => {
     );
     expect(snapshot.active?.model).toBe("prepaid");
     if (snapshot.active?.model === "prepaid") {
-      expect(snapshot.active.balanceCents).toBe(50000);
+      expect(snapshot.active.warningThresholdTokens).toBe(100);
     }
   });
 

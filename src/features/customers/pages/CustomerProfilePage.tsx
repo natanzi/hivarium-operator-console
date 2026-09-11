@@ -1,5 +1,5 @@
 import { ArrowLeft, Building2, Pencil } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
 import { useParams } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,7 @@ import type {
 import type {
   AgentAccessSnapshot,
   CommercialSnapshot,
+  PrepaidSnapshot,
 } from "@/data/local-storage-repository";
 import { cn } from "@/lib/utils";
 import {
@@ -34,7 +35,10 @@ import {
 } from "@/features/customers/components/CommercialArrangementSheet";
 import { AgentAccessSheet, RevokeAccessDialog } from "@/features/customers/components/AgentAccessSheet";
 import { ActivityTimeline } from "@/features/customers/components/ActivityTimeline";
+import { AddCreditSheet } from "@/features/customers/components/AddCreditSheet";
+import { EditThresholdSheet } from "@/features/customers/components/EditThresholdSheet";
 import {
+  formatTokens,
   formatUsd,
   modelImportantDate,
   modelLabel,
@@ -57,6 +61,9 @@ export function CustomerProfilePage() {
   const [, setRevision] = useState(0);
   const [commercialSheetOpen, setCommercialSheetOpen] = useState(false);
   const [accessSheetOpen, setAccessSheetOpen] = useState(false);
+  const [addCreditOpen, setAddCreditOpen] = useState(false);
+  const [editThresholdOpen, setEditThresholdOpen] = useState(false);
+  const addCreditButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const customer = useMemo(
     () => repo.getCustomer(customerId),
@@ -66,6 +73,7 @@ export function CustomerProfilePage() {
   // `refresh` bumps the revision state to re-render after a mutation.
   const commercialSnapshot = repo.getCommercialSnapshot(customerId, SEED_NOW);
   const accessSnapshot = repo.getAgentAccessSnapshot(customerId, SEED_NOW);
+  const prepaidSnapshot = repo.getPrepaidSnapshot(customerId, SEED_NOW);
   const activityEvents = repo.listActivityEvents(customerId);
   const entitlements = useMemo(
     () => repo.getFeatureEntitlements(customerId),
@@ -139,6 +147,7 @@ export function CustomerProfilePage() {
           <OverviewPanel
             customer={customer}
             snapshot={commercialSnapshot}
+            prepaidSnapshot={prepaidSnapshot}
             activeAgentCount={accessSnapshot.current.length}
             entitlements={entitlements}
             onSetCommercial={() => setCommercialSheetOpen(true)}
@@ -148,9 +157,13 @@ export function CustomerProfilePage() {
           <CommercialPanel
             customer={customer}
             snapshot={commercialSnapshot}
+            prepaidSnapshot={prepaidSnapshot}
             activeGrantCount={accessSnapshot.current.length}
             onChanged={refresh}
             onChangeCommercial={() => setCommercialSheetOpen(true)}
+            onAddCredit={() => setAddCreditOpen(true)}
+            onEditThreshold={() => setEditThresholdOpen(true)}
+            addCreditButtonRef={addCreditButtonRef}
           />
         </TabsContent>
         <TabsContent value="access" data-testid="panel-agent-access">
@@ -182,6 +195,23 @@ export function CustomerProfilePage() {
         onOpenChange={setAccessSheetOpen}
         onSaved={refresh}
       />
+      <AddCreditSheet
+        customer={customer}
+        balanceTokens={prepaidSnapshot.balanceTokens}
+        open={addCreditOpen}
+        onOpenChange={setAddCreditOpen}
+        onSaved={refresh}
+        addCreditButtonRef={addCreditButtonRef}
+      />
+      {prepaidSnapshot.arrangement ? (
+        <EditThresholdSheet
+          customer={customer}
+          arrangement={prepaidSnapshot.arrangement}
+          open={editThresholdOpen}
+          onOpenChange={setEditThresholdOpen}
+          onSaved={refresh}
+        />
+      ) : null}
 
       <TableFooter backTo="/customers" backLabel="All customers" />
     </div>
@@ -195,12 +225,14 @@ export function CustomerProfilePage() {
 function OverviewPanel({
   customer,
   snapshot,
+  prepaidSnapshot,
   activeAgentCount,
   entitlements,
   onSetCommercial,
 }: {
   customer: Customer;
   snapshot: CommercialSnapshot;
+  prepaidSnapshot: PrepaidSnapshot;
   activeAgentCount: number;
   entitlements: FeatureEntitlement[];
   onSetCommercial: () => void;
@@ -222,9 +254,25 @@ function OverviewPanel({
             {CUSTOMER_STATUS_LABELS[customer.status]}
           </span>
           {active ? (
-            <Badge variant="outline" className="border-sage/40 text-sage">
-              {modelLabel(active.model)}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="border-sage/40 text-sage">
+                {modelLabel(active.model)}
+              </Badge>
+              {active.model === "prepaid" && prepaidSnapshot.lowBalance ? (
+                <Badge
+                  variant="outline"
+                  className="border-gold text-gold"
+                  data-testid="low-balance-badge"
+                >
+                  <span className="sr-only">
+                    Low balance: {formatTokens(prepaidSnapshot.balanceTokens)}{" "}
+                    remaining; warning threshold{" "}
+                    {formatTokens(active.warningThresholdTokens)}
+                  </span>
+                  <span aria-hidden="true">Low balance</span>
+                </Badge>
+              ) : null}
+            </div>
           ) : (
             <Badge variant="outline">No commercial model</Badge>
           )}
@@ -232,7 +280,11 @@ function OverviewPanel({
         <dl className="mt-3 grid gap-3 sm:grid-cols-3">
           <OverviewMetric
             label="Commercial value"
-            value={active ? modelPrimaryValue(active) : "—"}
+            value={
+              active
+                ? modelPrimaryValue(active, prepaidSnapshot.balanceTokens)
+                : "—"
+            }
           />
           <OverviewMetric
             label="Important date"
@@ -346,15 +398,23 @@ function EmptyState({ heading, body }: { heading: string; body: string }) {
 function CommercialPanel({
   customer,
   snapshot,
+  prepaidSnapshot,
   activeGrantCount,
   onChanged,
   onChangeCommercial,
+  onAddCredit,
+  onEditThreshold,
+  addCreditButtonRef,
 }: {
   customer: Customer;
   snapshot: CommercialSnapshot;
+  prepaidSnapshot: PrepaidSnapshot;
   activeGrantCount: number;
   onChanged: () => void;
   onChangeCommercial: () => void;
+  onAddCredit: () => void;
+  onEditThreshold: () => void;
+  addCreditButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   const [terminateTarget, setTerminateTarget] =
     useState<CommercialArrangement | null>(null);
@@ -366,8 +426,12 @@ function CommercialPanel({
       {snapshot.active ? (
         <ArrangementCard
           arrangement={snapshot.active}
+          prepaidSnapshot={prepaidSnapshot}
           onChange={onChangeCommercial}
           onTerminate={() => setTerminateTarget(snapshot.active)}
+          onAddCredit={onAddCredit}
+          onEditThreshold={onEditThreshold}
+          addCreditButtonRef={addCreditButtonRef}
         />
       ) : (
         <EmptyState
@@ -442,12 +506,20 @@ function CommercialPanel({
 
 function ArrangementCard({
   arrangement,
+  prepaidSnapshot,
   onChange,
   onTerminate,
+  onAddCredit,
+  onEditThreshold,
+  addCreditButtonRef,
 }: {
   arrangement: CommercialArrangement;
+  prepaidSnapshot: PrepaidSnapshot;
   onChange: () => void;
   onTerminate: () => void;
+  onAddCredit: () => void;
+  onEditThreshold: () => void;
+  addCreditButtonRef: React.RefObject<HTMLButtonElement | null>;
 }) {
   return (
     <div
@@ -459,11 +531,45 @@ function ArrangementCard({
           <Badge className="border-sage/40 bg-sage-soft text-sage">
             {modelLabel(arrangement.model)}
           </Badge>
+          {arrangement.model === "prepaid" && prepaidSnapshot.lowBalance ? (
+            <Badge
+              variant="outline"
+              className="border-gold text-gold"
+              data-testid="low-balance-badge"
+            >
+              <span className="sr-only">
+                Low balance: {formatTokens(prepaidSnapshot.balanceTokens)}{" "}
+                remaining; warning threshold{" "}
+                {formatTokens(arrangement.warningThresholdTokens)}
+              </span>
+              <span aria-hidden="true">Low balance</span>
+            </Badge>
+          ) : null}
           <span className="text-muted-foreground text-xs capitalize">
             {arrangement.status}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {arrangement.model === "prepaid" ? (
+            <>
+              <Button
+                variant="default"
+                size="sm"
+                className="bg-[#9A4B23] text-white hover:bg-[#9A4B23]/90"
+                onClick={onAddCredit}
+                ref={addCreditButtonRef}
+              >
+                Add credit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onEditThreshold}
+              >
+                Edit threshold
+              </Button>
+            </>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
@@ -484,7 +590,7 @@ function ArrangementCard({
         </div>
       </div>
       <dl className="mt-3 grid gap-3 sm:grid-cols-3">
-        {arrangementTerms(arrangement)}
+        {arrangementTerms(arrangement, prepaidSnapshot)}
       </dl>
       {arrangement.reason ? (
         <p className="text-muted-foreground mt-3 text-xs">{arrangement.reason}</p>
@@ -493,7 +599,10 @@ function ArrangementCard({
   );
 }
 
-function arrangementTerms(arrangement: CommercialArrangement) {
+function arrangementTerms(
+  arrangement: CommercialArrangement,
+  prepaidSnapshot: PrepaidSnapshot
+) {
   if (arrangement.model === "monthly") {
     return (
       <>
@@ -509,7 +618,14 @@ function arrangementTerms(arrangement: CommercialArrangement) {
   if (arrangement.model === "prepaid") {
     return (
       <>
-        <Detail label="Balance" value={formatUsd(arrangement.balanceCents)} />
+        <Detail
+          label="Balance"
+          value={formatTokens(prepaidSnapshot.balanceTokens)}
+        />
+        <Detail
+          label="Warning threshold"
+          value={formatTokens(arrangement.warningThresholdTokens)}
+        />
         <Detail label="Effective" value={formatDate(arrangement.effectiveFrom)} />
         <Detail
           label="Expires"
@@ -518,8 +634,8 @@ function arrangementTerms(arrangement: CommercialArrangement) {
           }
         />
         <Detail
-          label="Usage accounting"
-          value="Added in Phase 2"
+          label="Balance source"
+          value={`Derived from ${prepaidSnapshot.transactionCount} immutable transactions`}
         />
       </>
     );
@@ -609,7 +725,7 @@ function primaryTerms(arrangement: CommercialArrangement): string {
     return `${formatUsd(arrangement.monthlyAmountCents)} / month`;
   }
   if (arrangement.model === "prepaid") {
-    return `${formatUsd(arrangement.balanceCents)} balance`;
+    return `Warning at ${formatTokens(arrangement.warningThresholdTokens)} or below`;
   }
   return `${formatUsd(arrangement.contractValueCents)} · ${arrangement.includedAllowance.toLocaleString()} ${arrangement.allowanceUnit}`;
 }

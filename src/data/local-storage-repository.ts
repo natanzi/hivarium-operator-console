@@ -8,9 +8,12 @@ import type {
   CustomerStatus,
   DataStore,
   FeatureEntitlement,
+  LedgerTransaction,
   LicenseStatus,
   MonthlyCommercialArrangement,
+  PrepaidCommercialArrangement,
   Subscription,
+  UsageRecord,
 } from "@/domain/types";
 import { normalizeCustomerStatus, STORE_SCHEMA_VERSION } from "@/domain/types";
 import {
@@ -26,6 +29,15 @@ import {
   type AgentAccessGrantInput,
   type CommercialArrangementInput,
 } from "@/domain/commercial-rules";
+import {
+  assertNoNegativeBalance,
+  creditGrantTransactionId,
+  deriveTokenBalance,
+  isLowBalance,
+  openingCreditReference,
+  openingCreditTransactionId,
+  validateLedgerTransaction,
+} from "@/domain/ledger-rules";
 import { buildSeedStore } from "@/data/seed-data";
 
 /** In-memory + optional localStorage persistence for the demo data store. */
@@ -88,12 +100,31 @@ export interface AgentCustomerAccessRow {
 }
 
 /**
+ * Deterministic as-of projection of a customer's prepaid token account.
+ *
+ * `arrangement` is the single prepaid arrangement in force at `asOf` (or
+ * `null`), `balanceTokens` is the derived balance (the signed sum of the
+ * customer's immutable ledger transactions), `transactionCount` is the number
+ * of immutable transactions behind that balance, and `lowBalance` is true
+ * when the derived balance is at or below the arrangement's warning
+ * threshold. The balance is always derived — no stored counter exists.
+ */
+export interface PrepaidSnapshot {
+  customerId: string;
+  asOf: string;
+  arrangement: PrepaidCommercialArrangement | null;
+  balanceTokens: number;
+  transactionCount: number;
+  lowBalance: boolean;
+}
+
+/**
  * Repository contract.
  *
  * All methods are synchronous so that the UI can render without async
  * coordination. Mutations are persisted to localStorage when available.
  *
- * The commercial/access methods operate on the canonical schemaVersion 2
+ * The commercial/access methods operate on the canonical schemaVersion 3
  * records. `getSubscriptions` and `getAgentLicenses` are narrow compatibility
  * projections derived from those canonical records for the pre-migration UI;
  * they are not competing active models.
@@ -180,6 +211,50 @@ export interface HiveRepository {
   // --- Activity ------------------------------------------------------------
   /** Chronological (newest first) activity events for a customer. */
   listActivityEvents(customerId: string): ActivityEvent[];
+
+  // --- Prepaid token ledger ------------------------------------------------
+  /**
+   * Chronological (oldest first) immutable ledger transactions for a customer.
+   */
+  listLedgerTransactions(customerId: string): LedgerTransaction[];
+  /**
+   * Derived token balance for a customer: the signed sum of the customer's
+   * immutable ledger transactions. Zero for an empty ledger. No stored
+   * balance counter exists.
+   */
+  getTokenBalance(customerId: string): number;
+  /**
+   * As-of projection of the customer's prepaid token account: the active
+   * prepaid arrangement (or `null`), the derived balance, the transaction
+   * count behind it, and the low-balance flag.
+   */
+  getPrepaidSnapshot(
+    customerId: string,
+    asOf: string | number
+  ): PrepaidSnapshot;
+  /**
+   * Append exactly one immutable `credit_grant` transaction for a customer
+   * with an active prepaid arrangement. Validates positive whole tokens and a
+   * required trimmed reference before one atomic write.
+   */
+  addCreditGrant(
+    input: {
+      customerId: string;
+      amountTokens: number;
+      reference: string;
+      reason?: string;
+    },
+    occurredAt: string
+  ): LedgerTransaction;
+  /**
+   * Update the warning threshold (non-negative whole tokens) on the active
+   * prepaid arrangement. Configuration only — never creates a ledger
+   * transaction.
+   */
+  updateWarningThreshold(
+    customerId: string,
+    thresholdTokens: number
+  ): PrepaidCommercialArrangement;
 }
 
 export type StorageLike = Pick<
@@ -324,6 +399,47 @@ function migrateEvents(
   return events;
 }
 
+/**
+ * Migrate legacy prepaid arrangements to the v3 shape and derive their
+ * deterministic opening token credits (D-15). Each prepaid arrangement with a
+ * positive legacy `balanceCents` receives exactly one `credit_grant` whose id
+ * and reference derive from the arrangement id; zero balances append nothing.
+ * The arrangement's `currency`/`balanceCents` are replaced by
+ * `warningThresholdTokens` (default 100).
+ */
+function migratePrepaidLedger(
+  arrangements: CommercialArrangement[]
+): {
+  arrangements: CommercialArrangement[];
+  ledgerTransactions: LedgerTransaction[];
+} {
+  const ledgerTransactions: LedgerTransaction[] = [];
+  const migrated = arrangements.map((arrangement) => {
+    if (arrangement.model !== "prepaid") return arrangement;
+    const legacy = arrangement as PrepaidCommercialArrangement & {
+      currency?: string;
+      balanceCents?: number;
+    };
+    const balanceCents = legacy.balanceCents ?? 0;
+    if (balanceCents > 0) {
+      ledgerTransactions.push({
+        id: openingCreditTransactionId(arrangement.id),
+        customerId: arrangement.customerId,
+        occurredAt: MIGRATION_TIMESTAMP,
+        kind: "credit_grant",
+        amountTokens: balanceCents,
+        reason: "Opening token credit from prototype migration",
+        reference: openingCreditReference(arrangement.id),
+      });
+    }
+    return {
+      ...arrangement,
+      warningThresholdTokens: legacy.warningThresholdTokens ?? 100,
+    };
+  });
+  return { arrangements: migrated, ledgerTransactions };
+}
+
 function normalizeV2Store(raw: Record<string, unknown>): DataStore {
   const seed = buildSeedStore();
   return {
@@ -339,6 +455,8 @@ function normalizeV2Store(raw: Record<string, unknown>): DataStore {
     ) as CommercialArrangement[],
     agentAccessGrants: asArray(raw.agentAccessGrants) as AgentAccessGrant[],
     activityEvents: asArray(raw.activityEvents) as ActivityEvent[],
+    ledgerTransactions: asArray(raw.ledgerTransactions) as LedgerTransaction[],
+    usageRecords: asArray(raw.usageRecords) as UsageRecord[],
   };
 }
 
@@ -396,14 +514,21 @@ export function migrateStore(raw: unknown): DataStore {
     migratedArrangements
   );
 
+  const prepaidMigration = migratePrepaidLedger(existingArrangements);
+
   return {
     schemaVersion: STORE_SCHEMA_VERSION,
     customers,
     featureEntitlements,
     agentProducts,
-    commercialArrangements: [...existingArrangements, ...migratedArrangements],
+    commercialArrangements: [
+      ...prepaidMigration.arrangements,
+      ...migratedArrangements,
+    ],
     agentAccessGrants: [...existingGrants, ...migratedGrants],
     activityEvents: [...existingEvents, ...migratedEvents],
+    ledgerTransactions: prepaidMigration.ledgerTransactions,
+    usageRecords: [],
   };
 }
 
@@ -918,6 +1043,123 @@ export class LocalStorageRepository implements HiveRepository {
     return this.read()
       .activityEvents.filter((event) => event.customerId === customerId)
       .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+  }
+
+  // -- Prepaid token ledger ------------------------------------------------
+  listLedgerTransactions(customerId: string): LedgerTransaction[] {
+    return this.read()
+      .ledgerTransactions.filter(
+        (transaction) => transaction.customerId === customerId
+      )
+      .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
+  }
+
+  getTokenBalance(customerId: string): number {
+    return deriveTokenBalance(this.read().ledgerTransactions, customerId);
+  }
+
+  getPrepaidSnapshot(
+    customerId: string,
+    asOf: string | number
+  ): PrepaidSnapshot {
+    const asOfIso = toIsoTimestamp(asOf);
+    const transactions = this.read().ledgerTransactions.filter(
+      (transaction) => transaction.customerId === customerId
+    );
+    const balanceTokens = deriveTokenBalance(transactions, customerId);
+    const commercial = this.getCommercialSnapshot(customerId, asOf);
+    const arrangement =
+      commercial.active?.model === "prepaid" ? commercial.active : null;
+    return {
+      customerId,
+      asOf: asOfIso,
+      arrangement,
+      balanceTokens,
+      transactionCount: transactions.length,
+      lowBalance:
+        arrangement !== null &&
+        isLowBalance(balanceTokens, arrangement.warningThresholdTokens),
+    };
+  }
+
+  addCreditGrant(
+    input: {
+      customerId: string;
+      amountTokens: number;
+      reference: string;
+      reason?: string;
+    },
+    occurredAt: string
+  ): LedgerTransaction {
+    const store = this.read();
+    const customerId = input.customerId;
+    if (!store.customers.some((c) => c.id === customerId)) {
+      throw new Error(`Customer with id "${customerId}" does not exist`);
+    }
+    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    if (!active || active.model !== "prepaid") {
+      throw new Error(
+        `Customer "${customerId}" does not have an active prepaid arrangement.`
+      );
+    }
+    const transaction: LedgerTransaction = {
+      id: creditGrantTransactionId(customerId, occurredAt),
+      customerId,
+      occurredAt,
+      kind: "credit_grant",
+      amountTokens: input.amountTokens,
+      reason: input.reason?.trim() || "Operator-confirmed token credit",
+      reference: input.reference.trim(),
+    };
+    const validation = validateLedgerTransaction(transaction);
+    if (!validation.ok) {
+      throw new Error(validation.problems.join(" "));
+    }
+    assertNoNegativeBalance(
+      store.ledgerTransactions,
+      customerId,
+      transaction.amountTokens
+    );
+    this.write({
+      ...store,
+      ledgerTransactions: [...store.ledgerTransactions, transaction],
+    });
+    return transaction;
+  }
+
+  updateWarningThreshold(
+    customerId: string,
+    thresholdTokens: number
+  ): PrepaidCommercialArrangement {
+    const store = this.read();
+    const active = this.getCommercialSnapshot(
+      customerId,
+      new Date().toISOString()
+    ).active;
+    if (!active || active.model !== "prepaid") {
+      throw new Error(
+        `Customer "${customerId}" does not have an active prepaid arrangement.`
+      );
+    }
+    if (
+      typeof thresholdTokens !== "number" ||
+      !Number.isFinite(thresholdTokens) ||
+      !Number.isInteger(thresholdTokens) ||
+      thresholdTokens < 0
+    ) {
+      throw new Error("thresholdTokens must be a non-negative whole number.");
+    }
+    const updated: PrepaidCommercialArrangement = {
+      ...active,
+      warningThresholdTokens: thresholdTokens,
+    };
+    this.write({
+      ...store,
+      commercialArrangements: store.commercialArrangements.map((a) =>
+        a.id === active.id ? updated : a
+      ),
+    });
+    return updated;
   }
 }
 

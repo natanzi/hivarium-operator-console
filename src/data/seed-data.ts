@@ -8,19 +8,25 @@ import type {
   CustomerStatus,
   DataStore,
   FeatureEntitlement,
+  LedgerTransaction,
   MonthlyCommercialArrangement,
   PlanTier,
   Subscription,
+  UsageRecord,
 } from "@/domain/types";
 import { STORE_SCHEMA_VERSION } from "@/domain/types";
 import { subscriptionToMonthlyArrangement } from "@/domain/commercial-rules";
+import {
+  openingCreditReference,
+  openingCreditTransactionId,
+} from "@/domain/ledger-rules";
 
 /**
  * Deterministic seed data for the Hivarium Operator Console.
  *
  * All records are fictional and fully static so the app (and its tests) are
  * reproducible. Exactly six customers are seeded. The store is authored
- * directly in the canonical schemaVersion 2 shape: legacy `Subscription` and
+ * directly in the canonical schemaVersion 3 shape: legacy `Subscription` and
  * `AgentLicense` records are migration inputs only and are never part of the
  * active store.
  */
@@ -31,6 +37,8 @@ export interface CustomerSeed {
   agentAccessGrants: AgentAccessGrant[];
   activityEvents: ActivityEvent[];
   featureEntitlements: FeatureEntitlement[];
+  ledgerTransactions: LedgerTransaction[];
+  usageRecords: UsageRecord[];
 }
 
 export const PLAN_LABELS: Record<PlanTier, string> = {
@@ -203,7 +211,9 @@ function seedCustomer(
   agentLicenses: AgentLicense[],
   extraArrangements: CommercialArrangement[] = [],
   extraEvents: ActivityEvent[] = [],
-  extraGrants: AgentAccessGrant[] = []
+  extraGrants: AgentAccessGrant[] = [],
+  extraLedgerTransactions: LedgerTransaction[] = [],
+  extraUsageRecords: UsageRecord[] = []
 ): CustomerSeed {
   const commercialArrangements: MonthlyCommercialArrangement[] =
     subscriptions.map(monthlyFromSubscription);
@@ -229,6 +239,8 @@ function seedCustomer(
     commercialArrangements: [...commercialArrangements, ...extraArrangements],
     agentAccessGrants,
     activityEvents,
+    ledgerTransactions: extraLedgerTransactions,
+    usageRecords: extraUsageRecords,
   };
 }
 
@@ -581,8 +593,7 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         customerId: "cust_meridians",
         status: "active",
         model: "prepaid",
-        currency: "USD",
-        balanceCents: 250000,
+        warningThresholdTokens: 100,
         effectiveFrom: "2026-04-11T13:00:00.000Z",
         effectiveTo: null,
         replacedByArrangementId: null,
@@ -651,6 +662,17 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
         scheduledRevokeAt: "2026-10-01T00:00:00.000Z",
         activityEventId: "evt_grant_meridians_sentinel",
         reasonForChange: "Scheduled revocation during consolidation review.",
+      },
+    ],
+    [
+      {
+        id: openingCreditTransactionId("arr_meridians_prepaid"),
+        customerId: "cust_meridians",
+        occurredAt: SEED_NOW,
+        kind: "credit_grant",
+        amountTokens: 250000,
+        reason: "Opening token credit from prototype migration",
+        reference: openingCreditReference("arr_meridians_prepaid"),
       },
     ]
   ),
@@ -789,7 +811,7 @@ export const SEED_CUSTOMERS: CustomerSeed[] = [
 
 /**
  * Flattened deterministic seed used by the storage repository at first boot.
- * Conforms strictly to schemaVersion 2.
+ * Conforms strictly to schemaVersion 3.
  */
 export function buildSeedStore(): DataStore {
   return {
@@ -804,6 +826,8 @@ export function buildSeedStore(): DataStore {
     ),
     agentAccessGrants: SEED_CUSTOMERS.flatMap((s) => s.agentAccessGrants),
     activityEvents: SEED_CUSTOMERS.flatMap((s) => s.activityEvents),
+    ledgerTransactions: SEED_CUSTOMERS.flatMap((s) => s.ledgerTransactions),
+    usageRecords: SEED_CUSTOMERS.flatMap((s) => s.usageRecords),
   };
 }
 

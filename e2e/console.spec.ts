@@ -133,20 +133,28 @@ test.describe("Hivarium Operator Console E2E", () => {
         await expect(sheet).toBeVisible();
 
         await page.locator('label[for="commercial-model-prepaid"]').click();
-        await page.getByTestId("prepaid-balance").fill("500");
         await page.getByTestId("arrangement-reason").fill("E2E prepaid balance");
         await page.getByTestId("submit-commercial-arrangement").click();
 
         await expect(page.getByText("Commercial model started")).toBeVisible();
         await expect(sheet).toHaveCount(0);
 
+        // A new prepaid account starts with an empty derived balance and the
+        // default 100-token warning threshold; there is no editable balance.
+        await expect(page.getByTestId("overview-summary-band")).toContainText("0 tokens");
+        await expect(page.getByTestId("overview-summary-band")).toContainText(
+            "Warning at 100 tokens or below"
+        );
+
         await page.getByTestId("tab-commercial").click();
         await expect(page.getByTestId("active-arrangement")).toContainText("Prepaid");
-        await expect(page.getByTestId("active-arrangement")).toContainText("$500.00");
+        await expect(page.getByTestId("active-arrangement")).toContainText("0 tokens");
+        await expect(page.getByTestId("active-arrangement")).toContainText("100 tokens");
 
         await page.reload();
         await page.getByTestId("tab-commercial").click();
-        await expect(page.getByTestId("active-arrangement")).toContainText("$500.00");
+        await expect(page.getByTestId("active-arrangement")).toContainText("0 tokens");
+        await expect(page.getByTestId("active-arrangement")).toContainText("100 tokens");
     });
 
     test("sets an annual commercial model and persists it after reload", async ({ page }) => {
@@ -375,5 +383,84 @@ test.describe("Hivarium Operator Console E2E", () => {
         await page.getByTestId("agent-access-link-grant_meridians_sentinel").click();
         await expect(page).toHaveURL(/\/customers\/cust_meridians$/);
         await expect(page.getByTestId("page-title")).toHaveText("Meridians Health");
+    });
+
+    // -------------------------------------------------------------------------
+    // Credit tracer: confirmed Add token credit persists balance and statement
+    // -------------------------------------------------------------------------
+
+    test("confirmed credit tracer persists balance and statement after reload", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-commercial").click();
+
+        const card = page.getByTestId("active-arrangement");
+        await expect(card).toContainText("250,000 tokens");
+        await expect(card).toContainText("100 tokens");
+        await expect(card).toContainText("Derived from 1 immutable transactions");
+
+        await page.getByRole("button", { name: "Add credit" }).click();
+        const sheet = page.getByTestId("add-credit-sheet");
+        await expect(sheet).toBeVisible();
+
+        await page.getByTestId("credit-amount").fill("5000");
+        await page.getByTestId("credit-reference").fill("E2E credit tracer");
+        await expect(page.getByTestId("resulting-balance")).toContainText("255,000 tokens");
+        await page.getByTestId("review-credit").click();
+
+        const confirmation = page.getByTestId("credit-confirmation");
+        await expect(confirmation).toBeVisible();
+        await expect(confirmation).toContainText("Add 5,000 tokens to Meridians Health?");
+        await expect(confirmation).toContainText(
+            "The balance will change from 250,000 tokens to 255,000 tokens."
+        );
+
+        await page.getByTestId("confirm-add-credit").click();
+
+        await expect(page.getByText("Token credit added")).toBeVisible();
+        await expect(sheet).toHaveCount(0);
+        await expect(card).toContainText("255,000 tokens");
+        await expect(card).toContainText("Derived from 2 immutable transactions");
+
+        await page.reload();
+        await page.getByTestId("tab-commercial").click();
+        await expect(page.getByTestId("active-arrangement")).toContainText("255,000 tokens");
+        await expect(page.getByTestId("active-arrangement")).toContainText(
+            "Derived from 2 immutable transactions"
+        );
+    });
+
+    // -------------------------------------------------------------------------
+    // Low-balance badge appears in the customer list and profile
+    // -------------------------------------------------------------------------
+
+    test("low-balance badge appears in list and profile after threshold edit", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-commercial").click();
+
+        await page.getByRole("button", { name: "Edit threshold" }).click();
+        const sheet = page.getByTestId("edit-threshold-sheet");
+        await expect(sheet).toBeVisible();
+
+        await page.getByTestId("threshold-tokens").fill("300000");
+        await page.getByTestId("save-threshold").click();
+
+        await expect(page.getByText("Warning threshold updated")).toBeVisible();
+        await expect(sheet).toHaveCount(0);
+
+        // The profile Overview and Commercial surfaces both flag the account.
+        await page.getByTestId("tab-overview").click();
+        await expect(page.getByTestId("overview-summary-band")).toContainText("Low balance");
+
+        await page.getByTestId("tab-commercial").click();
+        await expect(page.getByTestId("active-arrangement")).toContainText("Low balance");
+
+        // The customer list row carries the badge with accessible balance and
+        // threshold text.
+        await page.getByTestId("back-to-customers").click();
+        await expect(page).toHaveURL(/\/customers$/);
+        const row = page.getByTestId("customer-row-cust_meridians");
+        await expect(row).toContainText("Low balance");
+        await expect(row).toContainText("250,000 tokens");
+        await expect(row).toContainText("300,000 tokens");
     });
 });

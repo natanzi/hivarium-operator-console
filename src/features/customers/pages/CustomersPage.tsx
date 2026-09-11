@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   CUSTOMER_STATUS_LABELS,
   PLAN_LABELS,
+  SEED_NOW,
   STATUS_BADGE_CLASS,
 } from "@/data/seed-data";
 import { buildSeedStore } from "@/data/seed-data";
@@ -35,7 +36,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layout/Layout";
-import type { HiveRepository } from "@/data/local-storage-repository";
+import { formatTokens } from "@/features/customers/components/format";
+import type {
+  HiveRepository,
+  PrepaidSnapshot,
+} from "@/data/local-storage-repository";
 
 type StatusFilter = CustomerStatus | "all";
 
@@ -80,13 +85,14 @@ export function CustomersPage() {
     return counts;
   }, [customers]);
 
-  // Per-customer related records (subscriptions, entitlements, licenses) plus
-  // the agent product catalog, so the table columns can render without
-  // re-querying the repository for every row.
+  // Per-customer related records (subscriptions, entitlements, licenses,
+  // prepaid token accounts) plus the agent product catalog, so the table
+  // columns can render without re-querying the repository for every row.
   const related = useMemo(() => {
     const subscriptions = new Map<string, Subscription[]>();
     const entitlements = new Map<string, FeatureEntitlement[]>();
     const licenses = new Map<string, AgentLicense[]>();
+    const prepaid = new Map<string, PrepaidSnapshot>();
     const productNames = new Map(
       repo.listAgentProducts().map((p) => [p.id, p.name] as const)
     );
@@ -94,8 +100,9 @@ export function CustomersPage() {
       subscriptions.set(c.id, repo.getSubscriptions(c.id));
       entitlements.set(c.id, repo.getFeatureEntitlements(c.id));
       licenses.set(c.id, repo.getAgentLicenses(c.id));
+      prepaid.set(c.id, repo.getPrepaidSnapshot(c.id, SEED_NOW));
     }
-    return { subscriptions, entitlements, licenses, productNames };
+    return { subscriptions, entitlements, licenses, productNames, prepaid };
   }, [repo, customers]);
 
   const columns: DataTableColumn<Customer>[] = useMemo(() => {
@@ -138,6 +145,29 @@ export function CustomersPage() {
         id: "subscription",
         header: "Subscription",
         cell: (c) => {
+          const prepaid = related.prepaid.get(c.id);
+          if (prepaid?.arrangement) {
+            return (
+              <div className="leading-tight">
+                <p className="text-sm tabular-nums">
+                  {formatTokens(prepaid.balanceTokens)}
+                </p>
+                {prepaid.lowBalance ? (
+                  <span
+                    className="border-gold text-gold mt-1 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                    data-testid={`low-balance-${c.id}`}
+                  >
+                    <span className="sr-only">
+                      Low balance: {formatTokens(prepaid.balanceTokens)}{" "}
+                      remaining; warning threshold{" "}
+                      {formatTokens(prepaid.arrangement.warningThresholdTokens)}
+                    </span>
+                    <span aria-hidden="true">Low balance</span>
+                  </span>
+                ) : null}
+              </div>
+            );
+          }
           const subs = activeSubs(c);
           if (subs.length === 0) {
             return <span className="text-muted-foreground text-sm">—</span>;

@@ -96,19 +96,20 @@ export interface MonthlyCommercialArrangement
 }
 
 /**
- * Prepaid usage balance. The detailed usage ledger is added in Phase 2; this
- * record only stores the USD balance and optional expiry.
+ * Prepaid usage balance. The balance is derived from the immutable token
+ * ledger (`ledgerTransactions`); this record stores the configuration
+ * (`warningThresholdTokens`) and optional expiry only. No stored balance
+ * counter or currency exists on the record.
  */
 export interface PrepaidCommercialArrangement
   extends CommercialArrangementBase {
   model: "prepaid";
-  currency: "USD";
   /**
-   * Current monetary balance in integer cents (>= 0). This is a stored term,
-   * not a ledger balance: Phase 2 introduces the debit/adjustment ledger that
-   * will drive this value.
+   * Warning threshold in whole tokens (>= 0). A prepaid account whose derived
+   * balance is at or below this threshold is flagged as low-balance. Defaults
+   * to 100 for new arrangements and migrated demo records.
    */
-  balanceCents: number;
+  warningThresholdTokens: number;
   expiresAt: string | null;
   /** Optional operator note (e.g. the origin of a top-up). May be empty. */
   notes?: string;
@@ -232,26 +233,129 @@ export interface ActivityEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Token ledger and usage records
+// ---------------------------------------------------------------------------
+
+/**
+ * The four immutable ledger transaction kinds (D-04). Existing transactions
+ * are never edited or deleted; corrections append a linked `reversal`.
+ */
+export type LedgerTransactionKind =
+  | "credit_grant"
+  | "usage_debit"
+  | "manual_adjustment"
+  | "reversal";
+
+/**
+ * Common fields shared by every ledger transaction.
+ *
+ * `amountTokens` is a signed whole-token amount: positive for credits and
+ * positive adjustments, negative for usage debits and negative adjustments.
+ * A `reversal` always negates the full amount of its target transaction.
+ * `reference` is a stable external reference (e.g. an invoice or source
+ * reference) that makes the transaction traceable and idempotent.
+ */
+export interface LedgerTransactionBase {
+  id: string;
+  customerId: string;
+  /** ISO-8601 timestamp of when the transaction occurred. */
+  occurredAt: string;
+  /** Signed whole tokens (never fractional, never NaN). */
+  amountTokens: number;
+  /** Human-readable explanation of the transaction. */
+  reason: string;
+  /** Stable external reference (required, trimmed). */
+  reference: string;
+}
+
+/** Operator-confirmed credit grant adding whole tokens to the account. */
+export interface CreditGrantTransaction extends LedgerTransactionBase {
+  kind: "credit_grant";
+}
+
+/**
+ * Atomic usage debit. Links the operational {@link UsageRecord} and the
+ * catalog agent product that consumed the tokens.
+ */
+export interface UsageDebitTransaction extends LedgerTransactionBase {
+  kind: "usage_debit";
+  /** Id of the linked {@link UsageRecord}. */
+  usageRecordId: string;
+  /** Catalog agent product id that consumed the tokens. */
+  agentProductId: string;
+}
+
+/**
+ * Operator-entered signed correction. May add or subtract whole tokens and
+ * must obey the no-negative-balance rule.
+ */
+export interface ManualAdjustmentTransaction extends LedgerTransactionBase {
+  kind: "manual_adjustment";
+}
+
+/**
+ * Single full reversal of an earlier transaction. Negates the target's full
+ * token amount exactly once; a reversal of a reversal is rejected.
+ */
+export interface ReversalTransaction extends LedgerTransactionBase {
+  kind: "reversal";
+  /** Id of the original transaction being reversed. */
+  reversesTransactionId: string;
+}
+
+/** Discriminated union of the four supported ledger transaction kinds. */
+export type LedgerTransaction =
+  | CreditGrantTransaction
+  | UsageDebitTransaction
+  | ManualAdjustmentTransaction
+  | ReversalTransaction;
+
+/**
+ * Operational usage fact recorded alongside a `usage_debit` ledger
+ * transaction. `tokenQuantity` is always positive whole tokens and
+ * `sourceReference` is unique per customer so replaying the same source
+ * reference never debits twice.
+ */
+export interface UsageRecord {
+  id: string;
+  customerId: string;
+  agentProductId: string;
+  /** ISO-8601 timestamp of when the usage occurred. */
+  occurredAt: string;
+  /** Positive whole tokens consumed. */
+  tokenQuantity: number;
+  /** Unique external source reference for idempotency. */
+  sourceReference: string;
+  /** Id of the linked immutable `usage_debit` ledger transaction. */
+  ledgerTransactionId: string;
+}
+
+// ---------------------------------------------------------------------------
 // Storage schemas
 // ---------------------------------------------------------------------------
 
 /**
- * Canonical, versioned persisted store (`schemaVersion: 2`).
+ * Canonical, versioned persisted store (`schemaVersion: 3`).
  *
- * `commercialArrangements`, `agentAccessGrants`, and `activityEvents` are the
- * active generalized records. `customers`, `featureEntitlements`, and
- * `agentProducts` continue to hold shared data. Legacy v1-only collections
- * (`subscriptions`, `agentLicenses`) are intentionally absent; their meaning
- * is carried by the active records after migration.
+ * `commercialArrangements`, `agentAccessGrants`, `activityEvents`,
+ * `ledgerTransactions`, and `usageRecords` are the active generalized
+ * records. `customers`, `featureEntitlements`, and `agentProducts` continue
+ * to hold shared data. Legacy v1-only collections (`subscriptions`,
+ * `agentLicenses`) are intentionally absent; their meaning is carried by the
+ * active records after migration.
  */
 export interface DataStore {
-  schemaVersion: 2;
+  schemaVersion: 3;
   customers: Customer[];
   featureEntitlements: FeatureEntitlement[];
   agentProducts: AgentProduct[];
   commercialArrangements: CommercialArrangement[];
   agentAccessGrants: AgentAccessGrant[];
   activityEvents: ActivityEvent[];
+  /** Immutable, append-only token ledger transactions. */
+  ledgerTransactions: LedgerTransaction[];
+  /** Operational usage facts linked to `usage_debit` transactions. */
+  usageRecords: UsageRecord[];
 }
 
 /**
@@ -331,7 +435,7 @@ export interface AgentLicense {
 // ---------------------------------------------------------------------------
 
 /** Current schema version for the persisted store. */
-export const STORE_SCHEMA_VERSION = 2 as const;
+export const STORE_SCHEMA_VERSION = 3 as const;
 
 export const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
   "evaluation",

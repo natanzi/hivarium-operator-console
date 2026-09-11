@@ -13,6 +13,15 @@ export function formatUsd(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+/**
+ * Whole tokens with a unit label, e.g. `2,480 tokens` (singular `1 token`).
+ * Callers render the value with `tabular-nums` so digits align.
+ */
+export function formatTokens(tokens: number): string {
+  const count = tokens.toLocaleString("en-US");
+  return `${count} ${tokens === 1 ? "token" : "tokens"}`;
+}
+
 /** Human label for a commercial model. */
 export function modelLabel(model: CommercialArrangement["model"]): string {
   switch (model) {
@@ -25,31 +34,37 @@ export function modelLabel(model: CommercialArrangement["model"]): string {
   }
 }
 
-/** One model-specific primary value for the Overview summary band. */
+/**
+ * One model-specific primary value for the Overview summary band. Prepaid
+ * shows the derived token balance (never a stored USD balance).
+ */
 export function modelPrimaryValue(
-  arrangement: CommercialArrangement
+  arrangement: CommercialArrangement,
+  prepaidBalanceTokens?: number
 ): string {
   switch (arrangement.model) {
     case "monthly":
       return `${formatUsd(arrangement.monthlyAmountCents)} / month`;
     case "prepaid":
-      return `${formatUsd(arrangement.balanceCents)} balance`;
+      return formatTokens(prepaidBalanceTokens ?? 0);
     case "annual":
       return formatUsd(arrangement.contractValueCents);
   }
 }
 
-/** One model-specific important date for the Overview summary band. */
+/**
+ * One model-specific important date for the Overview summary band. Prepaid
+ * shows the configurable warning threshold instead of a stored balance.
+ */
 export function modelImportantDate(
-  arrangement: CommercialArrangement
+  arrangement: CommercialArrangement,
+  prepaidThresholdTokens?: number
 ): string {
   switch (arrangement.model) {
     case "monthly":
       return `Renews ${formatDate(arrangement.renewsAt)}`;
     case "prepaid":
-      return arrangement.expiresAt
-        ? `Expires ${formatDate(arrangement.expiresAt)}`
-        : "No expiry";
+      return `Warning at ${formatTokens(prepaidThresholdTokens ?? 0)} or below`;
     case "annual":
       return `Ends ${formatDate(arrangement.endsAt)}`;
   }

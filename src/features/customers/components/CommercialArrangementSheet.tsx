@@ -49,7 +49,12 @@ import type {
 import type { CommercialArrangementInput } from "@/domain/commercial-rules";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { formatUsd, modelLabel, TOUCH_TARGET } from "./format";
+import {
+  formatTokens,
+  formatUsd,
+  modelLabel,
+  TOUCH_TARGET,
+} from "./format";
 
 /**
  * Set / change / review / terminate workflow for a customer's commercial
@@ -67,7 +72,7 @@ type CommercialModel = (typeof COMMERCIAL_MODELS)[number];
 
 const MODEL_DESCRIPTIONS: Record<CommercialModel, string> = {
   monthly: "Fixed recurring monthly amount",
-  prepaid: "USD balance for usage",
+  prepaid: "Prepaid token account for usage",
   annual: "Term contract with allowance",
 };
 
@@ -88,7 +93,6 @@ const commercialSchema = z
     effectiveDate: z.string().optional(),
     monthlyAmountDollars: z.string().optional(),
     renewsAt: z.string().optional(),
-    balanceDollars: z.string().optional(),
     expiresAt: z.string().optional(),
     contractValueDollars: z.string().optional(),
     startsAt: z.string().optional(),
@@ -130,15 +134,6 @@ const commercialSchema = z
           code: z.ZodIssueCode.custom,
           path: ["renewsAt"],
           message: "Next renewal date is required.",
-        });
-      }
-    }
-    if (values.model === "prepaid") {
-      if (!values.balanceDollars || Number(values.balanceDollars) <= 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["balanceDollars"],
-          message: "Balance must be greater than zero.",
         });
       }
     }
@@ -219,7 +214,6 @@ function defaultValuesFor(
     effectiveDate: "",
     monthlyAmountDollars: "",
     renewsAt: "",
-    balanceDollars: "",
     expiresAt: "",
     contractValueDollars: "",
     startsAt: "",
@@ -241,7 +235,6 @@ function defaultValuesFor(
     case "prepaid":
       return {
         ...base,
-        balanceDollars: (source.balanceCents / 100).toFixed(2),
         expiresAt: source.expiresAt ? source.expiresAt.slice(0, 10) : "",
       };
     case "annual":
@@ -286,7 +279,7 @@ function ctaLabel(values: CommercialFormValues, submitting: boolean): string {
       case "monthly":
         return "Starting monthly subscription…";
       case "prepaid":
-        return "Activating prepaid balance…";
+        return "Activating prepaid account…";
       case "annual":
         return "Starting annual contract…";
     }
@@ -296,7 +289,7 @@ function ctaLabel(values: CommercialFormValues, submitting: boolean): string {
     case "monthly":
       return "Start monthly subscription";
     case "prepaid":
-      return "Activate prepaid balance";
+      return "Activate prepaid account";
     case "annual":
       return "Start annual contract";
   }
@@ -383,7 +376,7 @@ export function CommercialArrangementSheet({
       );
       input.renewsAt = `${submitted.renewsAt}T00:00:00.000Z`;
     } else if (submitted.model === "prepaid") {
-      input.balanceCents = Math.round(Number(submitted.balanceDollars) * 100);
+      input.warningThresholdTokens = 100;
       input.expiresAt = submitted.expiresAt
         ? `${submitted.expiresAt}T00:00:00.000Z`
         : null;
@@ -597,26 +590,6 @@ export function CommercialArrangementSheet({
               <>
                 <FormField
                   control={form.control}
-                  name="balanceDollars"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Balance (USD) *</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="2500.00"
-                          data-testid="prepaid-balance"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
                   name="expiresAt"
                   render={({ field }) => (
                     <FormItem>
@@ -633,7 +606,8 @@ export function CommercialArrangementSheet({
                   )}
                 />
                 <p className="text-muted-foreground text-xs">
-                  Detailed usage accounting is added in Phase 2.
+                  New prepaid accounts start with a 100-token warning
+                  threshold.
                 </p>
               </>
             ) : null}
@@ -988,8 +962,8 @@ export function ArrangementRecordDialog({
           ) : arrangement.model === "prepaid" ? (
             <>
               <RecordDetail
-                label="Balance"
-                value={formatUsd(arrangement.balanceCents)}
+                label="Warning threshold"
+                value={formatTokens(arrangement.warningThresholdTokens)}
               />
               <RecordDetail
                 label="Expires"

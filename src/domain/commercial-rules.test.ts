@@ -39,13 +39,15 @@ const T3 = "2027-01-01T00:00:00.000Z";
 
 function makeStore(overrides: Partial<DataStore> = {}): DataStore {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     customers: [],
     featureEntitlements: [],
     agentProducts: [],
     commercialArrangements: [],
     agentAccessGrants: [],
     activityEvents: [],
+    ledgerTransactions: [],
+    usageRecords: [],
     ...overrides,
   };
 }
@@ -136,8 +138,7 @@ const validPrepaidInput: CommercialArrangementInput = {
   effectiveTo: null,
   createdAt: NOW,
   reason: "Prepaid top-up.",
-  currency: "USD",
-  balanceCents: 50000,
+  warningThresholdTokens: 100,
   expiresAt: null,
 };
 
@@ -342,21 +343,23 @@ describe("validateCommercialArrangement", () => {
 
   it.each([
     {
-      name: "rejects a non-USD currency",
+      name: "rejects a negative warningThresholdTokens",
       mutate: (input: CommercialArrangementInput) => ({
         ...input,
-        currency: "GBP",
-      }),
-      expected: ["currency must be 'USD'."],
-    },
-    {
-      name: "rejects a negative balanceCents",
-      mutate: (input: CommercialArrangementInput) => ({
-        ...input,
-        balanceCents: -100,
+        warningThresholdTokens: -1,
       }),
       expected: [
-        "balanceCents must be a non-negative integer number of cents.",
+        "warningThresholdTokens must be a non-negative integer number of tokens.",
+      ],
+    },
+    {
+      name: "rejects a fractional warningThresholdTokens",
+      mutate: (input: CommercialArrangementInput) => ({
+        ...input,
+        warningThresholdTokens: 10.5,
+      }),
+      expected: [
+        "warningThresholdTokens must be a non-negative integer number of tokens.",
       ],
     },
     {
@@ -632,6 +635,26 @@ describe("applyCommercialTransition", () => {
     const result = applyCommercialTransition(store, input, NOW);
     expect(result.arrangement.status).toBe("scheduled");
     expect(result.event.resultingState).toBe("scheduled");
+  });
+
+  it("defaults the prepaid warning threshold to 100 tokens when omitted", () => {
+    const store = makeStore();
+    const input = { ...validPrepaidInput, warningThresholdTokens: undefined };
+    const result = applyCommercialTransition(store, input, NOW);
+    expect(result.arrangement.model).toBe("prepaid");
+    if (result.arrangement.model === "prepaid") {
+      expect(result.arrangement.warningThresholdTokens).toBe(100);
+    }
+  });
+
+  it("preserves an explicit prepaid warning threshold", () => {
+    const store = makeStore();
+    const input = { ...validPrepaidInput, warningThresholdTokens: 250 };
+    const result = applyCommercialTransition(store, input, NOW);
+    expect(result.arrangement.model).toBe("prepaid");
+    if (result.arrangement.model === "prepaid") {
+      expect(result.arrangement.warningThresholdTokens).toBe(250);
+    }
   });
 
   it("immediately replaces the active arrangement and closes it at the boundary", () => {

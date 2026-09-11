@@ -99,7 +99,7 @@ export interface CommercialArrangementInput {
   billingCadence?: unknown;
   monthlyAmountCents?: unknown;
   renewsAt?: unknown;
-  balanceCents?: unknown;
+  warningThresholdTokens?: unknown;
   expiresAt?: unknown;
   contractValueCents?: unknown;
   startsAt?: unknown;
@@ -255,9 +255,14 @@ function validatePrepaid(
   input: CommercialArrangementInput
 ): ModelSpecificIssues {
   const problems: string[] = [];
-  if (input.currency !== "USD") problems.push("currency must be 'USD'.");
-  if (!isNonNegInt(input.balanceCents)) {
-    problems.push("balanceCents must be a non-negative integer number of cents.");
+  if (
+    input.warningThresholdTokens !== undefined &&
+    input.warningThresholdTokens !== null &&
+    !isNonNegInt(input.warningThresholdTokens)
+  ) {
+    problems.push(
+      "warningThresholdTokens must be a non-negative integer number of tokens."
+    );
   }
   if (
     input.expiresAt !== null &&
@@ -766,8 +771,8 @@ export function buildArrangementFromInput(
     return {
       ...base,
       model,
-      currency: "USD",
-      balanceCents: input.balanceCents as number,
+      warningThresholdTokens:
+        (input.warningThresholdTokens as number | undefined) ?? 100,
       expiresAt: (input.expiresAt as string | null) ?? null,
       notes: input.notes as string | undefined,
     };
