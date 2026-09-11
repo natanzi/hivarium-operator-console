@@ -33,7 +33,7 @@ export function formatTokens(tokens: number): string {
 export function formatSignedTokens(tokens: number): string {
   const count = Math.abs(tokens).toLocaleString("en-US");
   const sign = tokens < 0 ? "−" : "+";
-  return `${sign}${count} ${count === "1" ? "token" : "tokens"}`;
+  return `${sign}${count} ${Math.abs(tokens) === 1 ? "token" : "tokens"}`;
 }
 
 /** Human labels for the four immutable ledger transaction kinds. */
@@ -86,7 +86,9 @@ export function modelImportantDate(
     case "monthly":
       return `Renews ${formatDate(arrangement.renewsAt)}`;
     case "prepaid":
-      return `Warning at ${formatTokens(prepaidThresholdTokens ?? 0)} or below`;
+      return `Warning at ${formatTokens(
+        prepaidThresholdTokens ?? arrangement.warningThresholdTokens
+      )} or below`;
     case "annual":
       return `Ends ${formatDate(arrangement.endsAt)}`;
   }

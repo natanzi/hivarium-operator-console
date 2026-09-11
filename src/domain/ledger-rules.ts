@@ -497,10 +497,12 @@ export interface AccountStatementRow {
 }
 
 /**
- * Project a customer's ledger into chronological statement rows with
- * full-account running balances (LEDG-05). Rows are ordered ascending by
- * `occurredAt` with an array-index tie-breaker so the projection is
- * deterministic; callers that display newest-first reverse the result.
+ * Project a customer's ledger into statement rows with full-account running
+ * balances (LEDG-05). Balances are derived in deterministic ascending order
+ * (`occurredAt`, then original array index as tie-breaker) so every row's
+ * `resultingBalanceTokens` is the full-account balance after that transaction;
+ * the returned display list is newest first. Filters applied later never
+ * recalculate a row's resulting balance (Pattern 4).
  */
 export function projectAccountStatement(
   transactions: readonly LedgerTransaction[],
@@ -516,10 +518,258 @@ export function projectAccountStatement(
     );
 
   let runningBalance = 0;
-  return customerTransactions.map(({ transaction }) => {
+  const rows = customerTransactions.map(({ transaction }) => {
     runningBalance += transaction.amountTokens;
     return { transaction, resultingBalanceTokens: runningBalance };
   });
+  return rows.reverse();
+}
+
+// ---------------------------------------------------------------------------
+// Statement filtering and usage aggregation
+// ---------------------------------------------------------------------------
+
+/**
+ * Inclusive date-range and attribute filters for a statement display list.
+ * `from`/`to` are ISO-8601 dates or timestamps; date-only values expand to the
+ * full day (start-of-day for `from`, end-of-day for `to`). `agentProductId`
+ * matches `usage_debit` rows only; `type` matches the transaction kind.
+ */
+export interface StatementFilter {
+  from?: string;
+  to?: string;
+  agentProductId?: string;
+  type?: LedgerTransactionKind;
+}
+
+/**
+ * Inclusive date range for usage aggregation. Both boundaries are optional;
+ * an absent boundary leaves that side unbounded.
+ */
+export interface UsagePeriod {
+  from?: string;
+  to?: string;
+}
+
+/**
+ * Optional attribute narrowing for usage aggregation, mirroring the statement
+ * filters so the selected-period summary tracks the visible statement.
+ */
+export interface UsageAggregationFilter {
+  agentProductId?: string;
+  type?: LedgerTransactionKind;
+}
+
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Normalize one inclusive date boundary to an instant. Date-only values
+ * ("YYYY-MM-DD") expand to the start of day for `from` and the end of day for
+ * `to`; full ISO timestamps are used as-is. Returns `null` for an absent
+ * boundary and throws a stable error for an unparseable value.
+ */
+function normalizeDateBoundary(
+  value: string | undefined,
+  endOfDay: boolean
+): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  const trimmed = value.trim();
+  const ms = Date.parse(trimmed);
+  if (Number.isNaN(ms)) {
+    throw new Error("Date filter must be a valid ISO-8601 date or timestamp.");
+  }
+  if (DATE_ONLY_REGEX.test(trimmed)) {
+    return endOfDay ? ms + 86_400_000 - 1 : ms;
+  }
+  return ms;
+}
+
+interface NormalizedPeriod {
+  fromMs: number | null;
+  toMs: number | null;
+}
+
+/**
+ * Normalize a date range once and reject an inverted range with a stable
+ * human-readable error (USGE-03, A1). Callers keep the last valid result by
+ * catching this error before applying a new filter.
+ */
+function normalizePeriod(period: UsagePeriod): NormalizedPeriod {
+  const fromMs = normalizeDateBoundary(period.from, false);
+  const toMs = normalizeDateBoundary(period.to, true);
+  if (fromMs !== null && toMs !== null && fromMs > toMs) {
+    throw new Error("From date must be on or before To date.");
+  }
+  return { fromMs, toMs };
+}
+
+/**
+ * Filter a statement display list (USGE-03). Date boundaries are inclusive
+ * and normalized once; `agentProductId` keeps only `usage_debit` rows for
+ * that agent; `type` keeps only rows of that kind. Filters apply to displayed
+ * rows only and never recalculate a row's `resultingBalanceTokens`, which
+ * always remains the full-account balance at that transaction (LEDG-05,
+ * Pattern 4). Throws "From date must be on or before To date." for an
+ * inverted range.
+ */
+export function filterStatement(
+  rows: readonly AccountStatementRow[],
+  filter: StatementFilter
+): AccountStatementRow[] {
+  const { fromMs, toMs } = normalizePeriod({
+    from: filter.from,
+    to: filter.to,
+  });
+  const agentProductId = filter.agentProductId?.trim() || undefined;
+  const type = filter.type;
+
+  return rows.filter((row) => {
+    const occurredMs = parseInstant(row.transaction.occurredAt);
+    if (fromMs !== null && occurredMs < fromMs) return false;
+    if (toMs !== null && occurredMs > toMs) return false;
+    if (agentProductId !== undefined) {
+      if (row.transaction.kind !== "usage_debit") return false;
+      if (row.transaction.agentProductId !== agentProductId) return false;
+    }
+    if (type !== undefined && row.transaction.kind !== type) return false;
+    return true;
+  });
+}
+
+/**
+ * One agent's net usage effect within a period: the signed sum of that
+ * agent's in-period usage debits net of their reversals. Negative means
+ * tokens were consumed; zero means fully reversed; positive means reversals
+ * restored tokens.
+ */
+export interface AgentUsageTotal {
+  agentProductId: string;
+  netTokensConsumed: number;
+}
+
+/**
+ * Compute the per-agent net usage effects for a customer within a period.
+ * A `usage_debit` contributes its signed amount to its agent; a `reversal`
+ * contributes its signed amount to the agent of the usage debit it reverses,
+ * so a fully reversed debit nets to zero (D-05, USGE-04, Pattern 2).
+ */
+function usageEffectsByAgent(
+  transactions: readonly LedgerTransaction[],
+  customerId: string,
+  period: NormalizedPeriod,
+  filter: UsageAggregationFilter
+): Map<string, number> {
+  const byId = new Map(
+    transactions.map((transaction) => [transaction.id, transaction])
+  );
+  const totals = new Map<string, number>();
+  const agentProductId = filter.agentProductId?.trim() || undefined;
+  const type = filter.type;
+
+  for (const transaction of transactions) {
+    if (transaction.customerId !== customerId) continue;
+    const occurredMs = parseInstant(transaction.occurredAt);
+    if (period.fromMs !== null && occurredMs < period.fromMs) continue;
+    if (period.toMs !== null && occurredMs > period.toMs) continue;
+
+    if (transaction.kind === "usage_debit") {
+      if (
+        agentProductId !== undefined &&
+        transaction.agentProductId !== agentProductId
+      ) {
+        continue;
+      }
+      if (type !== undefined && type !== "usage_debit") continue;
+      totals.set(
+        transaction.agentProductId,
+        (totals.get(transaction.agentProductId) ?? 0) + transaction.amountTokens
+      );
+    } else if (transaction.kind === "reversal") {
+      if (type !== undefined && type !== "reversal") continue;
+      const target = byId.get(transaction.reversesTransactionId);
+      if (
+        !target ||
+        target.customerId !== customerId ||
+        target.kind !== "usage_debit"
+      ) {
+        continue;
+      }
+      if (
+        agentProductId !== undefined &&
+        target.agentProductId !== agentProductId
+      ) {
+        continue;
+      }
+      totals.set(
+        target.agentProductId,
+        (totals.get(target.agentProductId) ?? 0) + transaction.amountTokens
+      );
+    }
+  }
+  return totals;
+}
+
+/**
+ * Net tokens consumed for a customer within a period (USGE-04): the signed
+ * sum of in-period usage effects (usage debits net of their reversals).
+ * Negative means net consumption, zero means fully reversed, positive means
+ * net restoration. Optional `agentProductId`/`type` narrowing mirrors the
+ * statement filters so the summary tracks the visible statement.
+ */
+export function sumPeriodUsage(
+  transactions: readonly LedgerTransaction[],
+  customerId: string,
+  period: UsagePeriod,
+  filter: UsageAggregationFilter = {}
+): number {
+  const normalized = normalizePeriod(period);
+  const totals = usageEffectsByAgent(
+    transactions,
+    customerId,
+    normalized,
+    filter
+  );
+  let sum = 0;
+  for (const value of totals.values()) sum += value;
+  return sum;
+}
+
+/**
+ * Compact per-agent usage breakdown for a customer within a period (USGE-04):
+ * one row per agent with net usage effects, ordered highest consumption first
+ * (most negative net first) with ties broken by agent name (falling back to
+ * the agent product id when no name is known). A fully reversed debit keeps
+ * its agent row at zero net.
+ */
+export function groupUsageByAgent(
+  transactions: readonly LedgerTransaction[],
+  customerId: string,
+  period: UsagePeriod,
+  agentNames?: ReadonlyMap<string, string>,
+  filter: UsageAggregationFilter = {}
+): AgentUsageTotal[] {
+  const normalized = normalizePeriod(period);
+  const totals = usageEffectsByAgent(
+    transactions,
+    customerId,
+    normalized,
+    filter
+  );
+  const rows: AgentUsageTotal[] = [...totals.entries()].map(
+    ([agentProductId, netTokensConsumed]) => ({
+      agentProductId,
+      netTokensConsumed,
+    })
+  );
+  rows.sort((a, b) => {
+    if (a.netTokensConsumed !== b.netTokensConsumed) {
+      return a.netTokensConsumed - b.netTokensConsumed;
+    }
+    const nameA = agentNames?.get(a.agentProductId) ?? a.agentProductId;
+    const nameB = agentNames?.get(b.agentProductId) ?? b.agentProductId;
+    return nameA.localeCompare(nameB);
+  });
+  return rows;
 }
 
 // ---------------------------------------------------------------------------

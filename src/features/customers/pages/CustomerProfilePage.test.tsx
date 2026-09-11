@@ -76,10 +76,18 @@ async function openAdjustmentSheet(user: ReturnType<typeof userEvent.setup>) {
   return screen.findByTestId("adjustment-sheet");
 }
 
-/** Opens the Reverse transaction sheet from the Activity tab. */
-async function openReversalSheet(user: ReturnType<typeof userEvent.setup>) {
+/**
+ * Opens the Reverse transaction sheet from the Activity tab by clicking the
+ * per-row "Reverse transaction" action for `transactionId`. Defaults to the
+ * seeded opening credit so the shared reversal flows keep their original
+ * target.
+ */
+async function openReversalSheet(
+  user: ReturnType<typeof userEvent.setup>,
+  transactionId = "txn_opening_arr_meridians_prepaid"
+) {
   await user.click(screen.getByTestId("tab-activity"));
-  await user.click(screen.getByTestId("reverse-transaction"));
+  await user.click(screen.getByTestId(`reverse-${transactionId}`));
   return screen.findByTestId("reversal-sheet");
 }
 
@@ -919,6 +927,234 @@ describe("CustomerProfilePage", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Token account statement
+  // -------------------------------------------------------------------------
+
+  it("renders the token account statement newest first with full-account balances", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await user.click(screen.getByTestId("tab-activity"));
+
+    // The statement is the first section of the Activity tab, above the
+    // commercial/access timeline.
+    const statement = screen.getByTestId("token-statement");
+    expect(statement).toHaveTextContent("Token account statement");
+    expect(statement).toHaveTextContent("Balance 250,000 tokens");
+    expect(
+      statement.compareDocumentPosition(screen.getByTestId("activity-timeline")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    const table = screen.getByRole("table", {
+      name: "Token account statement for Meridians Health",
+    });
+    const rows = within(table).getAllByRole("row");
+    // Header row plus six newest-first statement rows.
+    expect(rows).toHaveLength(7);
+
+    // Newest first: the July credit grant leads, the April opening credit last.
+    expect(rows[1]).toHaveTextContent("Credit grant");
+    expect(rows[1]).toHaveTextContent("+2,000 tokens");
+    expect(rows[1]).toHaveTextContent("250,000 tokens");
+    expect(rows[1]).toHaveTextContent("credit_meridians_jul_001");
+
+    expect(rows[2]).toHaveTextContent("Reversal");
+    expect(rows[2]).toHaveTextContent("+1,500 tokens");
+    expect(rows[2]).toHaveTextContent("248,000 tokens");
+    expect(rows[2]).toHaveTextContent("rev_usage_meridians_jun_003");
+    expect(rows[2]).toHaveTextContent("Reverses usage_meridians_jun_003");
+
+    expect(rows[3]).toHaveTextContent("Usage debit");
+    expect(rows[3]).toHaveTextContent("−1,500 tokens");
+    expect(rows[3]).toHaveTextContent("246,500 tokens");
+    expect(rows[3]).toHaveTextContent("usage_meridians_jun_003");
+    expect(rows[3]).toHaveTextContent("Sentinel");
+    expect(rows[3]).toHaveTextContent("Reversed");
+
+    expect(rows[4]).toHaveTextContent("Usage debit");
+    expect(rows[4]).toHaveTextContent("−800 tokens");
+    expect(rows[4]).toHaveTextContent("248,000 tokens");
+    expect(rows[4]).toHaveTextContent("usage_meridians_jun_002");
+    expect(rows[4]).toHaveTextContent("Mercator");
+
+    expect(rows[5]).toHaveTextContent("Usage debit");
+    expect(rows[5]).toHaveTextContent("−1,200 tokens");
+    expect(rows[5]).toHaveTextContent("248,800 tokens");
+    expect(rows[5]).toHaveTextContent("usage_meridians_may_001");
+    expect(rows[5]).toHaveTextContent("Sentinel");
+
+    expect(rows[6]).toHaveTextContent("Credit grant");
+    expect(rows[6]).toHaveTextContent("+250,000 tokens");
+    expect(rows[6]).toHaveTextContent("250,000 tokens");
+    expect(rows[6]).toHaveTextContent("opening_arr_meridians_prepaid");
+  });
+
+  it("combines date, agent, and transaction-type filters", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await user.click(screen.getByTestId("tab-activity"));
+
+    await user.type(screen.getByTestId("statement-from"), "2026-05-01");
+    await user.type(screen.getByTestId("statement-to"), "2026-06-30");
+    await user.click(screen.getByTestId("statement-agent-trigger"));
+    await user.click(
+      screen.getByTestId("statement-agent-option-agent_sentinel")
+    );
+    await user.click(screen.getByTestId("statement-type-trigger"));
+    await user.click(screen.getByTestId("statement-type-option-usage_debit"));
+
+    const table = screen.getByRole("table", {
+      name: "Token account statement for Meridians Health",
+    });
+    const rows = within(table).getAllByRole("row");
+    // Header plus the two Sentinel usage debits inside the May–June window.
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toHaveTextContent("usage_meridians_jun_003");
+    expect(rows[1]).toHaveTextContent("−1,500 tokens");
+    expect(rows[1]).toHaveTextContent("246,500 tokens");
+    expect(rows[2]).toHaveTextContent("usage_meridians_may_001");
+    expect(rows[2]).toHaveTextContent("−1,200 tokens");
+    expect(rows[2]).toHaveTextContent("248,800 tokens");
+
+    // The selected-period summary tracks the combined filters.
+    expect(screen.getByTestId("statement-net-consumed")).toHaveTextContent(
+      "−2,700 tokens"
+    );
+    expect(
+      screen.getByTestId("statement-agent-agent_sentinel")
+    ).toHaveTextContent("Sentinel — 2,700 tokens");
+  });
+
+  it("keeps rows on both inclusive date boundaries", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await user.click(screen.getByTestId("tab-activity"));
+
+    await user.type(screen.getByTestId("statement-from"), "2026-06-20");
+    await user.type(screen.getByTestId("statement-to"), "2026-06-21");
+
+    const table = screen.getByRole("table", {
+      name: "Token account statement for Meridians Health",
+    });
+    const rows = within(table).getAllByRole("row");
+    // Both boundary rows remain visible: the reversal on the 21st and the
+    // usage debit on the 20th.
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toHaveTextContent("rev_usage_meridians_jun_003");
+    expect(rows[2]).toHaveTextContent("usage_meridians_jun_003");
+  });
+
+  it("shows the exact empty-filtered copy and keeps filters available", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await user.click(screen.getByTestId("tab-activity"));
+
+    await user.type(screen.getByTestId("statement-from"), "2026-01-01");
+    await user.type(screen.getByTestId("statement-to"), "2026-01-31");
+
+    const empty = screen.getByTestId("statement-empty-filtered");
+    expect(empty).toHaveTextContent("No transactions match these filters");
+    expect(empty).toHaveTextContent(
+      "Clear one or more filters to review the full token account statement."
+    );
+    // The current balance and filters remain visible.
+    expect(screen.getByTestId("token-statement")).toHaveTextContent(
+      "Balance 250,000 tokens"
+    );
+    const clear = screen.getByTestId("clear-statement-filters");
+    expect(clear).toBeEnabled();
+    await user.click(clear);
+    const table = screen.getByRole("table", {
+      name: "Token account statement for Meridians Health",
+    });
+    expect(within(table).getAllByRole("row")).toHaveLength(7);
+  });
+
+  it("shows per-agent totals ordered highest consumption first", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await user.click(screen.getByTestId("tab-activity"));
+
+    expect(screen.getByTestId("statement-net-consumed")).toHaveTextContent(
+      "−2,000 tokens"
+    );
+    const summary = screen.getByTestId("statement-summary");
+    const agentRows = within(summary).getAllByRole("listitem");
+    expect(agentRows).toHaveLength(2);
+    expect(agentRows[0]).toHaveTextContent("Sentinel — 1,200 tokens");
+    expect(agentRows[1]).toHaveTextContent("Mercator — 800 tokens");
+  });
+
+  it("nets a reversed usage debit to zero in the selected period", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await user.click(screen.getByTestId("tab-activity"));
+
+    await user.type(screen.getByTestId("statement-from"), "2026-06-20");
+    await user.type(screen.getByTestId("statement-to"), "2026-06-21");
+
+    expect(screen.getByTestId("statement-net-consumed")).toHaveTextContent(
+      "0 tokens"
+    );
+    expect(
+      screen.getByTestId("statement-agent-agent_sentinel")
+    ).toHaveTextContent("Sentinel — 0 tokens");
+    // The reversed original row remains visible with a neutral Reversed badge.
+    expect(
+      screen.getByTestId("reversed-txn_usage_usage_meridians_jun_003")
+    ).toHaveTextContent("Reversed");
+  });
+
+  it("shows the exact empty-account copy for a historical prepaid account", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    repository.createCustomer({
+      id: "cust_prepaid_hist",
+      name: "Prepaid History Co",
+      domain: "prepaid-hist.example",
+      contact: "A B",
+      email: "a@prepaid-hist.example",
+      status: "active",
+      notes: "",
+    });
+    repository.saveCommercialArrangement(
+      {
+        id: "arr_prepaid_hist",
+        customerId: "cust_prepaid_hist",
+        model: "prepaid",
+        status: "active",
+        effectiveFrom: "2025-01-01T00:00:00.000Z",
+        effectiveTo: null,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        reason: "Historical prepaid",
+        warningThresholdTokens: 100,
+        expiresAt: null,
+      },
+      "2025-01-01T00:00:00.000Z"
+    );
+    repository.terminateCommercialArrangement(
+      {
+        arrangementId: "arr_prepaid_hist",
+        customerId: "cust_prepaid_hist",
+        reason: "Closed",
+      },
+      "2025-06-01T00:00:00.000Z"
+    );
+    renderProfilePath("/customers/cust_prepaid_hist", repository);
+    await user.click(screen.getByTestId("tab-activity"));
+
+    const empty = screen.getByTestId("statement-empty");
+    expect(empty).toHaveTextContent("No token transactions yet");
+    expect(empty).toHaveTextContent(
+      "Add token credit to create this customer's first immutable statement entry."
+    );
+    // A historical prepaid account with zero entries is read-only.
+    expect(
+      screen.queryByTestId("statement-add-credit")
+    ).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
   // Record usage sheet
   // -------------------------------------------------------------------------
 
@@ -1309,7 +1545,33 @@ describe("CustomerProfilePage", () => {
     await user.click(screen.getByTestId("confirm-reverse-transaction"));
     expect(await screen.findByText("Transaction reversed")).toBeInTheDocument();
 
-    await openReversalSheet(user);
+    // The reversed original row now shows a neutral Reversed badge and no
+    // reverse action, so the second attempt is exercised through the sheet
+    // directly against the already-reversed target.
+    const customer = repository.getCustomer("cust_meridians");
+    const openingCredit = repository
+      .listLedgerTransactions("cust_meridians")
+      .find(
+        (transaction) =>
+          transaction.kind === "credit_grant" &&
+          transaction.reference === "opening_arr_meridians_prepaid"
+      );
+    expect(customer).toBeDefined();
+    expect(openingCredit).toBeDefined();
+    render(
+      <RepositoryProvider repository={repository}>
+        <ReversalSheet
+          customer={customer!}
+          transaction={openingCredit!}
+          balanceTokens={0}
+          open
+          onOpenChange={() => {}}
+          onSaved={() => {}}
+        />
+        <Toaster position="bottom-right" />
+      </RepositoryProvider>
+    );
+
     await user.type(screen.getByTestId("reversal-reference"), "rev_second_001");
     await user.type(screen.getByTestId("reversal-reason"), "Second reversal");
     await user.click(screen.getByTestId("review-reversal"));

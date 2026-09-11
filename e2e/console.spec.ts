@@ -396,7 +396,7 @@ test.describe("Hivarium Operator Console E2E", () => {
         const card = page.getByTestId("active-arrangement");
         await expect(card).toContainText("250,000 tokens");
         await expect(card).toContainText("100 tokens");
-        await expect(card).toContainText("Derived from 1 immutable transactions");
+        await expect(card).toContainText("Derived from 6 immutable transactions");
 
         await page.getByRole("button", { name: "Add credit" }).click();
         const sheet = page.getByTestId("add-credit-sheet");
@@ -419,7 +419,7 @@ test.describe("Hivarium Operator Console E2E", () => {
         await expect(page.getByText("Token credit added")).toBeVisible();
         await expect(sheet).toHaveCount(0);
         await expect(card).toContainText("255,000 tokens");
-        await expect(card).toContainText("Derived from 2 immutable transactions");
+        await expect(card).toContainText("Derived from 7 immutable transactions");
 
         await page.reload();
         await page.getByTestId("tab-commercial").click();
@@ -674,5 +674,218 @@ test.describe("Hivarium Operator Console E2E", () => {
             .click();
         await expect(sheet).toHaveCount(0);
         await expect(page.getByTestId("panel-activity")).toContainText("250,000 tokens");
+    });
+
+    // -------------------------------------------------------------------------
+    // Token account statement: running balances, filters, empty-filtered copy,
+    // and reversed-usage netting (02-03 Task 3)
+    // -------------------------------------------------------------------------
+
+    test("statement renders running balances and survives reload", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-activity").click();
+
+        const statement = page.getByTestId("token-statement");
+        await expect(statement).toBeVisible();
+        await expect(statement).toContainText("Token account statement");
+        await expect(statement).toContainText("Balance 250,000 tokens");
+
+        // Newest-first rows with signed amounts and full-account resulting
+        // balances (never filtered subtotals).
+        const rows = statement.locator("tbody tr");
+        await expect(rows).toHaveCount(6);
+
+        await expect(rows.nth(0)).toContainText("Credit grant");
+        await expect(rows.nth(0)).toContainText("+2,000 tokens");
+        await expect(rows.nth(0)).toContainText("250,000 tokens");
+        await expect(rows.nth(0)).toContainText("credit_meridians_jul_001");
+
+        await expect(rows.nth(1)).toContainText("Reversal");
+        await expect(rows.nth(1)).toContainText("+1,500 tokens");
+        await expect(rows.nth(1)).toContainText("248,000 tokens");
+        await expect(rows.nth(1)).toContainText("rev_usage_meridians_jun_003");
+
+        await expect(rows.nth(2)).toContainText("Usage debit");
+        await expect(rows.nth(2)).toContainText("−1,500 tokens");
+        await expect(rows.nth(2)).toContainText("246,500 tokens");
+        await expect(rows.nth(2)).toContainText("usage_meridians_jun_003");
+        await expect(rows.nth(2)).toContainText("Sentinel");
+
+        await expect(rows.nth(3)).toContainText("Usage debit");
+        await expect(rows.nth(3)).toContainText("−800 tokens");
+        await expect(rows.nth(3)).toContainText("248,000 tokens");
+        await expect(rows.nth(3)).toContainText("usage_meridians_jun_002");
+        await expect(rows.nth(3)).toContainText("Mercator");
+
+        await expect(rows.nth(4)).toContainText("Usage debit");
+        await expect(rows.nth(4)).toContainText("−1,200 tokens");
+        await expect(rows.nth(4)).toContainText("248,800 tokens");
+        await expect(rows.nth(4)).toContainText("usage_meridians_may_001");
+
+        await expect(rows.nth(5)).toContainText("Credit grant");
+        await expect(rows.nth(5)).toContainText("+250,000 tokens");
+        await expect(rows.nth(5)).toContainText("250,000 tokens");
+        await expect(rows.nth(5)).toContainText("opening_arr_meridians_prepaid");
+
+        // The statement survives a full page refresh.
+        await page.reload();
+        await page.getByTestId("tab-activity").click();
+        await expect(page.getByTestId("token-statement")).toContainText(
+            "Balance 250,000 tokens"
+        );
+        await expect(
+            page.getByTestId("token-statement").locator("tbody tr")
+        ).toHaveCount(6);
+        await expect(
+            page.getByTestId("token-statement").locator("tbody tr").nth(0)
+        ).toContainText("credit_meridians_jul_001");
+    });
+
+    test("filters narrow the statement and update the selected-period summary", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-activity").click();
+
+        const statement = page.getByTestId("token-statement");
+        const rows = statement.locator("tbody tr");
+
+        // Date range alone: inclusive boundaries keep the June 2 debit and the
+        // June 21 reversal visible.
+        await page.getByTestId("statement-from").fill("2026-06-02");
+        await page.getByTestId("statement-to").fill("2026-06-21");
+        await expect(rows).toHaveCount(3);
+        await expect(rows.nth(0)).toContainText("rev_usage_meridians_jun_003");
+        await expect(rows.nth(1)).toContainText("usage_meridians_jun_003");
+        await expect(rows.nth(2)).toContainText("usage_meridians_jun_002");
+        await expect(page.getByTestId("statement-net-consumed")).toHaveText(
+            "−800 tokens"
+        );
+        await expect(
+            page.getByTestId("statement-agent-agent_mercator")
+        ).toContainText("Mercator — 800 tokens");
+        await expect(
+            page.getByTestId("statement-agent-agent_sentinel")
+        ).toContainText("Sentinel — 0 tokens");
+
+        // Agent filter alone: only Sentinel usage and its reversal remain.
+        await page.getByTestId("clear-statement-filters").click();
+        await page.getByTestId("statement-agent-trigger").click();
+        await page.getByTestId("statement-agent-option-agent_sentinel").click();
+        await expect(rows).toHaveCount(3);
+        await expect(rows.nth(0)).toContainText("rev_usage_meridians_jun_003");
+        await expect(rows.nth(1)).toContainText("usage_meridians_jun_003");
+        await expect(rows.nth(2)).toContainText("usage_meridians_may_001");
+        await expect(page.getByTestId("statement-net-consumed")).toHaveText(
+            "−1,200 tokens"
+        );
+        await expect(
+            page.getByTestId("statement-agent-agent_sentinel")
+        ).toContainText("Sentinel — 1,200 tokens");
+
+        // Transaction-type filter alone: only the reversal row remains.
+        await page.getByTestId("clear-statement-filters").click();
+        await page.getByTestId("statement-type-trigger").click();
+        await page.getByTestId("statement-type-option-reversal").click();
+        await expect(rows).toHaveCount(1);
+        await expect(rows.nth(0)).toContainText("rev_usage_meridians_jun_003");
+        await expect(page.getByTestId("statement-net-consumed")).toHaveText(
+            "+1,500 tokens"
+        );
+        await expect(
+            page.getByTestId("statement-agent-agent_sentinel")
+        ).toContainText("Sentinel — 1,500 tokens");
+
+        // All three filters together: the June 20 Sentinel usage debit only.
+        await page.getByTestId("statement-from").fill("2026-06-02");
+        await page.getByTestId("statement-to").fill("2026-06-21");
+        await page.getByTestId("statement-agent-trigger").click();
+        await page.getByTestId("statement-agent-option-agent_sentinel").click();
+        await page.getByTestId("statement-type-trigger").click();
+        await page.getByTestId("statement-type-option-usage_debit").click();
+        await expect(rows).toHaveCount(1);
+        await expect(rows.nth(0)).toContainText("usage_meridians_jun_003");
+        await expect(rows.nth(0)).toContainText("−1,500 tokens");
+        await expect(rows.nth(0)).toContainText("246,500 tokens");
+        await expect(page.getByTestId("statement-net-consumed")).toHaveText(
+            "−1,500 tokens"
+        );
+        await expect(
+            page.getByTestId("statement-agent-agent_sentinel")
+        ).toContainText("Sentinel — 1,500 tokens");
+
+        // Clear filters restores the full statement and the full-period summary.
+        await page.getByTestId("clear-statement-filters").click();
+        await expect(rows).toHaveCount(6);
+        await expect(page.getByTestId("statement-net-consumed")).toHaveText(
+            "−2,000 tokens"
+        );
+        await expect(
+            page.getByTestId("statement-agent-agent_sentinel")
+        ).toContainText("Sentinel — 1,200 tokens");
+        await expect(
+            page.getByTestId("statement-agent-agent_mercator")
+        ).toContainText("Mercator — 800 tokens");
+    });
+
+    test("filters to an empty result show the documented copy", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-activity").click();
+
+        await page.getByTestId("statement-from").fill("2026-08-01");
+        await page.getByTestId("statement-to").fill("2026-08-31");
+
+        const empty = page.getByTestId("statement-empty-filtered");
+        await expect(empty).toBeVisible();
+        await expect(empty).toContainText("No transactions match these filters");
+        await expect(empty).toContainText(
+            "Clear one or more filters to review the full token account statement."
+        );
+
+        // The current balance and the filter controls remain visible.
+        await expect(page.getByTestId("token-statement")).toContainText(
+            "Balance 250,000 tokens"
+        );
+        await expect(page.getByTestId("statement-from")).toBeVisible();
+        await expect(page.getByTestId("statement-to")).toBeVisible();
+
+        // Clear filters restores the full statement.
+        await page.getByTestId("clear-statement-filters").click();
+        await expect(page.getByTestId("statement-empty-filtered")).toHaveCount(0);
+        await expect(
+            page.getByTestId("token-statement").locator("tbody tr")
+        ).toHaveCount(6);
+    });
+
+    test("reversed usage nets to zero in the selected period", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-activity").click();
+
+        // The reversed original row remains visible with a neutral Reversed
+        // badge linking to its reversal.
+        const reversedBadge = page.getByTestId(
+            "reversed-txn_usage_usage_meridians_jun_003"
+        );
+        await expect(reversedBadge).toBeVisible();
+        await expect(reversedBadge).toContainText("Reversed");
+
+        // The reversal row itself names the original transaction reference.
+        const reversalRow = page.locator(
+            '[data-row-id="txn_reversal_txn_usage_usage_meridians_jun_003"]'
+        );
+        await expect(reversalRow).toBeVisible();
+        await expect(reversalRow).toContainText("Reverses usage_meridians_jun_003");
+        await expect(reversalRow).toContainText("+1,500 tokens");
+
+        // The period containing the debit and its reversal nets to zero.
+        await page.getByTestId("statement-from").fill("2026-06-20");
+        await page.getByTestId("statement-to").fill("2026-06-21");
+        await expect(page.getByTestId("statement-net-consumed")).toHaveText(
+            "0 tokens"
+        );
+        await expect(
+            page.getByTestId("statement-agent-agent_sentinel")
+        ).toContainText("Sentinel — 0 tokens");
+
+        // The reversed original row stays visible inside the filtered period.
+        await expect(reversedBadge).toBeVisible();
     });
 });

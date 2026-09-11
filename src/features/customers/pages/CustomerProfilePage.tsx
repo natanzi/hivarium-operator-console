@@ -21,6 +21,7 @@ import type {
   CommercialArrangement,
   Customer,
   FeatureEntitlement,
+  LedgerTransaction,
 } from "@/domain/types";
 import type {
   AgentAccessSnapshot,
@@ -35,6 +36,7 @@ import {
 } from "@/features/customers/components/CommercialArrangementSheet";
 import { AgentAccessSheet, RevokeAccessDialog } from "@/features/customers/components/AgentAccessSheet";
 import { ActivityTimeline } from "@/features/customers/components/ActivityTimeline";
+import { TokenStatement } from "@/features/customers/components/TokenStatement";
 import { AddCreditSheet } from "@/features/customers/components/AddCreditSheet";
 import { AdjustmentSheet } from "@/features/customers/components/AdjustmentSheet";
 import { RecordUsageSheet } from "@/features/customers/components/RecordUsageSheet";
@@ -68,6 +70,8 @@ export function CustomerProfilePage() {
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [reversalOpen, setReversalOpen] = useState(false);
+  const [reversalTarget, setReversalTarget] =
+    useState<LedgerTransaction | null>(null);
   const [editThresholdOpen, setEditThresholdOpen] = useState(false);
   const addCreditButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -81,16 +85,20 @@ export function CustomerProfilePage() {
   const accessSnapshot = repo.getAgentAccessSnapshot(customerId, SEED_NOW);
   const prepaidSnapshot = repo.getPrepaidSnapshot(customerId, SEED_NOW);
   const activityEvents = repo.listActivityEvents(customerId);
+  // Newest-first statement rows for the Activity tab's Token account
+  // statement. Re-read on every render so mutations refresh the statement.
+  const statementRows = repo.getAccountStatement(customerId);
+  // The statement section appears when prepaid ledger history exists: any
+  // prepaid arrangement (active or historical) or any ledger transactions.
+  const hasPrepaidLedger =
+    statementRows.length > 0 ||
+    commercialSnapshot.history.some(
+      (arrangement) => arrangement.model === "prepaid"
+    );
   // Agent products the customer may currently use, for the Record usage sheet.
   const availableAgentIds = accessSnapshot.current.map(
     (grant) => grant.agentProductId
   );
-  // Placeholder reversal target until the 02-03 statement wires per-row
-  // "Reverse transaction" actions: the most recent non-reversal transaction.
-  const ledgerTransactions = repo.listLedgerTransactions(customerId);
-  const reversalTarget =
-    [...ledgerTransactions].reverse().find((t) => t.kind !== "reversal") ??
-    null;
   const entitlements = useMemo(
     () => repo.getFeatureEntitlements(customerId),
     [repo, customerId]
@@ -193,34 +201,20 @@ export function CustomerProfilePage() {
           />
         </TabsContent>
         <TabsContent value="activity" data-testid="panel-activity">
-          {prepaidSnapshot.arrangement ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold">Token account</h3>
-                <p className="text-muted-foreground text-xs">
-                  Balance {formatTokens(prepaidSnapshot.balanceTokens)}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {reversalTarget ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => setReversalOpen(true)}
-                    data-testid="reverse-transaction"
-                    className={TOUCH_TARGET}
-                  >
-                    Reverse transaction
-                  </Button>
-                ) : null}
-                <Button
-                  onClick={() => setUsageOpen(true)}
-                  data-testid="record-usage"
-                  className={TOUCH_TARGET}
-                >
-                  Record usage
-                </Button>
-              </div>
-            </div>
+          {hasPrepaidLedger ? (
+            <TokenStatement
+              customer={customer}
+              balanceTokens={prepaidSnapshot.balanceTokens}
+              statementRows={statementRows}
+              products={products}
+              activePrepaid={prepaidSnapshot.arrangement !== null}
+              onRecordUsage={() => setUsageOpen(true)}
+              onAddCredit={() => setAddCreditOpen(true)}
+              onReverseTransaction={(transaction) => {
+                setReversalTarget(transaction);
+                setReversalOpen(true);
+              }}
+            />
           ) : null}
           <ActivityTimeline events={activityEvents} products={products} />
         </TabsContent>

@@ -9,6 +9,7 @@ import type {
   DataStore,
   FeatureEntitlement,
   LedgerTransaction,
+  LedgerTransactionKind,
   LicenseStatus,
   MonthlyCommercialArrangement,
   PrepaidCommercialArrangement,
@@ -34,14 +35,22 @@ import {
   assertNoNegativeBalance,
   creditGrantTransactionId,
   deriveTokenBalance,
+  filterStatement,
+  groupUsageByAgent,
   isLowBalance,
   normalizeUsageFingerprint,
   openingCreditReference,
   openingCreditTransactionId,
+  projectAccountStatement,
   recordUsage,
   reverseTransaction as applyReversal,
+  sumPeriodUsage,
   validateLedgerTransaction,
   validateUsageIdempotency,
+  type AccountStatementRow,
+  type AgentUsageTotal,
+  type UsageAggregationFilter,
+  type UsagePeriod,
 } from "@/domain/ledger-rules";
 import { buildSeedStore } from "@/data/seed-data";
 
@@ -121,6 +130,29 @@ export interface PrepaidSnapshot {
   balanceTokens: number;
   transactionCount: number;
   lowBalance: boolean;
+}
+
+/**
+ * One agent's row in the selected-period usage breakdown. `agentName` is the
+ * catalog display name resolved by the repository; `netTokensConsumed` is the
+ * signed net usage effect (negative = consumed, zero = fully reversed).
+ */
+export interface AgentUsageSummaryRow extends AgentUsageTotal {
+  agentName: string;
+}
+
+/**
+ * Read-only usage summary for a customer (USGE-03, USGE-04): the statement
+ * rows after applying the date/agent/type filters, the signed net tokens
+ * consumed for the selected period, and a compact per-agent breakdown ordered
+ * highest consumption first. `rows` keep their full-account resulting
+ * balances — filters never recalculate them.
+ */
+export interface UsageSummary {
+  customerId: string;
+  rows: AccountStatementRow[];
+  netTokensConsumed: number;
+  perAgent: AgentUsageSummaryRow[];
 }
 
 /**
@@ -311,6 +343,24 @@ export interface HiveRepository {
     customerId: string,
     thresholdTokens: number
   ): PrepaidCommercialArrangement;
+  /**
+   * Derived chronological statement rows for a customer (LEDG-05): newest-first
+   * display rows with full-account running balances. Read-only; never writes.
+   */
+  getAccountStatement(customerId: string): AccountStatementRow[];
+  /**
+   * Filtered statement rows plus the selected-period usage summary (USGE-03,
+   * USGE-04): net tokens consumed and a compact per-agent breakdown ordered
+   * highest consumption first. Date boundaries are inclusive; an inverted
+   * range throws "From date must be on or before To date." Read-only; never
+   * writes.
+   */
+  getUsageSummary(
+    customerId: string,
+    period: UsagePeriod,
+    agentProductId?: string,
+    type?: LedgerTransactionKind
+  ): UsageSummary;
 }
 
 export type StorageLike = Pick<
@@ -1338,6 +1388,56 @@ export class LocalStorageRepository implements HiveRepository {
       ),
     });
     return updated;
+  }
+
+  getAccountStatement(customerId: string): AccountStatementRow[] {
+    return projectAccountStatement(
+      this.read().ledgerTransactions,
+      customerId
+    );
+  }
+
+  getUsageSummary(
+    customerId: string,
+    period: UsagePeriod,
+    agentProductId?: string,
+    type?: LedgerTransactionKind
+  ): UsageSummary {
+    const store = this.read();
+    const statement = projectAccountStatement(
+      store.ledgerTransactions,
+      customerId
+    );
+    const rows = filterStatement(statement, {
+      from: period.from,
+      to: period.to,
+      agentProductId,
+      type,
+    });
+    const aggregationFilter: UsageAggregationFilter = {
+      agentProductId,
+      type,
+    };
+    const netTokensConsumed = sumPeriodUsage(
+      store.ledgerTransactions,
+      customerId,
+      period,
+      aggregationFilter
+    );
+    const agentNames = new Map(
+      store.agentProducts.map((product) => [product.id, product.name])
+    );
+    const perAgent = groupUsageByAgent(
+      store.ledgerTransactions,
+      customerId,
+      period,
+      agentNames,
+      aggregationFilter
+    ).map((row) => ({
+      ...row,
+      agentName: agentNames.get(row.agentProductId) ?? row.agentProductId,
+    }));
+    return { customerId, rows, netTokensConsumed, perAgent };
   }
 }
 

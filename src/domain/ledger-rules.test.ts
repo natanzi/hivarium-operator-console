@@ -5,6 +5,8 @@ import {
   assertNoNegativeBalance,
   creditGrantTransactionId,
   deriveTokenBalance,
+  filterStatement,
+  groupUsageByAgent,
   isLowBalance,
   manualAdjustmentTransactionId,
   normalizeUsageFingerprint,
@@ -14,6 +16,7 @@ import {
   recordUsage,
   reversalTransactionId,
   reverseTransaction,
+  sumPeriodUsage,
   usageDebitTransactionId,
   usageRecordId,
   validateLedgerTransaction,
@@ -29,6 +32,8 @@ import type {
   CreditGrantTransaction,
   DataStore,
   LedgerTransaction,
+  ManualAdjustmentTransaction,
+  ReversalTransaction,
   UsageDebitTransaction,
   UsageRecord,
 } from "./types";
@@ -85,6 +90,37 @@ function usageRecord(
     tokenQuantity: 250,
     sourceReference: "ref_usage_1",
     ledgerTransactionId: "txn_usage_1",
+    ...overrides,
+  };
+}
+
+function reversal(
+  overrides: Partial<ReversalTransaction> = {}
+): ReversalTransaction {
+  return {
+    id: "txn_reversal_1",
+    customerId: "cust_1",
+    occurredAt: T2,
+    kind: "reversal",
+    amountTokens: 250,
+    reason: "Reversing usage.",
+    reference: "ref_reversal_1",
+    reversesTransactionId: "txn_usage_1",
+    ...overrides,
+  };
+}
+
+function manualAdjustment(
+  overrides: Partial<ManualAdjustmentTransaction> = {}
+): ManualAdjustmentTransaction {
+  return {
+    id: "txn_adjust_1",
+    customerId: "cust_1",
+    occurredAt: T2,
+    kind: "manual_adjustment",
+    amountTokens: -50,
+    reason: "Correction.",
+    reference: "ref_adjust_1",
     ...overrides,
   };
 }
@@ -1048,7 +1084,7 @@ describe("projectAccountStatement", () => {
     expect(projectAccountStatement([], "cust_1")).toEqual([]);
   });
 
-  it("derives full-account running balances in chronological order", () => {
+  it("derives full-account running balances and returns the display list newest first", () => {
     const transactions: LedgerTransaction[] = [
       credit({ id: "txn_credit_1", occurredAt: T0, amountTokens: 1000 }),
       usageDebit({ id: "txn_usage_1", occurredAt: T1, amountTokens: -250 }),
@@ -1056,12 +1092,12 @@ describe("projectAccountStatement", () => {
     ];
     const rows = projectAccountStatement(transactions, "cust_1");
     expect(rows.map((row) => row.transaction.id)).toEqual([
-      "txn_credit_1",
-      "txn_usage_1",
       "txn_credit_2",
+      "txn_usage_1",
+      "txn_credit_1",
     ]);
     expect(rows.map((row) => row.resultingBalanceTokens)).toEqual([
-      1000, 750, 1050,
+      1050, 750, 1000,
     ]);
   });
 
@@ -1071,8 +1107,8 @@ describe("projectAccountStatement", () => {
       credit({ id: "txn_b", occurredAt: NOW, amountTokens: 200 }),
     ];
     const rows = projectAccountStatement(transactions, "cust_1");
-    expect(rows.map((row) => row.transaction.id)).toEqual(["txn_a", "txn_b"]);
-    expect(rows.map((row) => row.resultingBalanceTokens)).toEqual([100, 300]);
+    expect(rows.map((row) => row.transaction.id)).toEqual(["txn_b", "txn_a"]);
+    expect(rows.map((row) => row.resultingBalanceTokens)).toEqual([300, 100]);
   });
 
   it("ignores other customers' transactions", () => {
@@ -1087,5 +1123,384 @@ describe("projectAccountStatement", () => {
     const rows = projectAccountStatement(transactions, "cust_1");
     expect(rows).toHaveLength(1);
     expect(rows[0].resultingBalanceTokens).toBe(1000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// filterStatement
+// ---------------------------------------------------------------------------
+
+describe("filterStatement", () => {
+  const transactions: LedgerTransaction[] = [
+    credit({ id: "txn_credit_1", occurredAt: T0, amountTokens: 1000 }),
+    usageDebit({
+      id: "txn_usage_1",
+      occurredAt: T1,
+      amountTokens: -250,
+      agentProductId: "agent_sentinel",
+    }),
+    credit({ id: "txn_credit_2", occurredAt: T2, amountTokens: 300 }),
+    usageDebit({
+      id: "txn_usage_2",
+      occurredAt: T2,
+      amountTokens: -100,
+      agentProductId: "agent_mercator",
+    }),
+  ];
+  // Newest-first display: usage_2 (950), credit_2 (1050), usage_1 (750),
+  // credit_1 (1000).
+  const rows = projectAccountStatement(transactions, "cust_1");
+
+  it("returns every row unchanged when no filter is applied", () => {
+    expect(filterStatement(rows, {})).toEqual(rows);
+  });
+
+  it("keeps rows at or after an inclusive from boundary", () => {
+    const filtered = filterStatement(rows, { from: T1 });
+    expect(filtered.map((row) => row.transaction.id)).toEqual([
+      "txn_usage_2",
+      "txn_credit_2",
+      "txn_usage_1",
+    ]);
+  });
+
+  it("keeps rows at or before an inclusive to boundary", () => {
+    const filtered = filterStatement(rows, { to: T1 });
+    expect(filtered.map((row) => row.transaction.id)).toEqual([
+      "txn_usage_1",
+      "txn_credit_1",
+    ]);
+  });
+
+  it("expands a date-only from to the start of day", () => {
+    const boundary = credit({
+      id: "txn_boundary",
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      amountTokens: 50,
+    });
+    const all = projectAccountStatement([...transactions, boundary], "cust_1");
+    const filtered = filterStatement(all, { from: "2026-06-01" });
+    expect(
+      filtered.some((row) => row.transaction.id === "txn_boundary")
+    ).toBe(true);
+  });
+
+  it("expands a date-only to to the end of day", () => {
+    const boundary = credit({
+      id: "txn_boundary",
+      occurredAt: "2026-06-01T23:59:59.999Z",
+      amountTokens: 50,
+    });
+    const all = projectAccountStatement([...transactions, boundary], "cust_1");
+    const filtered = filterStatement(all, { to: "2026-06-01" });
+    expect(
+      filtered.some((row) => row.transaction.id === "txn_boundary")
+    ).toBe(true);
+  });
+
+  it("filters by agent product keeping only usage_debit rows for that agent", () => {
+    const filtered = filterStatement(rows, {
+      agentProductId: "agent_sentinel",
+    });
+    expect(filtered.map((row) => row.transaction.id)).toEqual([
+      "txn_usage_1",
+    ]);
+  });
+
+  it("filters by transaction type", () => {
+    const filtered = filterStatement(rows, { type: "credit_grant" });
+    expect(filtered.map((row) => row.transaction.id)).toEqual([
+      "txn_credit_2",
+      "txn_credit_1",
+    ]);
+  });
+
+  it("combines date, agent, and type filters", () => {
+    const filtered = filterStatement(rows, {
+      from: T0,
+      to: T1,
+      agentProductId: "agent_sentinel",
+      type: "usage_debit",
+    });
+    expect(filtered.map((row) => row.transaction.id)).toEqual([
+      "txn_usage_1",
+    ]);
+  });
+
+  it("never recalculates resulting balances from filtered rows", () => {
+    const filtered = filterStatement(rows, { type: "usage_debit" });
+    // Full-account balances at those transactions, not a filtered subtotal.
+    expect(filtered.map((row) => row.resultingBalanceTokens)).toEqual([
+      950, 750,
+    ]);
+    expect(filtered.map((row) => row.transaction.id)).toEqual([
+      "txn_usage_2",
+      "txn_usage_1",
+    ]);
+  });
+
+  it("throws for an inverted date range", () => {
+    expect(() => filterStatement(rows, { from: T2, to: T1 })).toThrow(
+      /From date must be on or before To date/
+    );
+  });
+
+  it("throws for an unparseable date boundary", () => {
+    expect(() => filterStatement(rows, { from: "not-a-date" })).toThrow(
+      /valid ISO-8601 date or timestamp/
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sumPeriodUsage
+// ---------------------------------------------------------------------------
+
+describe("sumPeriodUsage", () => {
+  const transactions: LedgerTransaction[] = [
+    credit({ id: "txn_credit_1", occurredAt: T0, amountTokens: 1000 }),
+    usageDebit({
+      id: "txn_usage_1",
+      occurredAt: T1,
+      amountTokens: -250,
+      agentProductId: "agent_sentinel",
+    }),
+    usageDebit({
+      id: "txn_usage_2",
+      occurredAt: T2,
+      amountTokens: -100,
+      agentProductId: "agent_mercator",
+    }),
+    reversal({
+      id: "txn_reversal_1",
+      occurredAt: NOW,
+      amountTokens: 250,
+      reversesTransactionId: "txn_usage_1",
+    }),
+  ];
+
+  it("returns zero for an empty ledger", () => {
+    expect(sumPeriodUsage([], "cust_1", {})).toBe(0);
+  });
+
+  it("returns zero when no usage effects fall in the period", () => {
+    expect(
+      sumPeriodUsage(transactions, "cust_1", {
+        from: "2025-01-01",
+        to: "2025-12-31",
+      })
+    ).toBe(0);
+  });
+
+  it("sums in-period usage debits net of their reversals", () => {
+    // Sentinel: -250 + 250 = 0; Mercator: -100. Net: -100.
+    expect(sumPeriodUsage(transactions, "cust_1", {})).toBe(-100);
+  });
+
+  it("nets a fully reversed usage debit to zero", () => {
+    const pair: LedgerTransaction[] = [
+      usageDebit({
+        id: "txn_usage_1",
+        occurredAt: T1,
+        amountTokens: -250,
+        agentProductId: "agent_sentinel",
+      }),
+      reversal({
+        id: "txn_reversal_1",
+        occurredAt: T2,
+        amountTokens: 250,
+        reversesTransactionId: "txn_usage_1",
+      }),
+    ];
+    expect(
+      sumPeriodUsage(pair, "cust_1", { from: T1, to: T2 })
+    ).toBe(0);
+  });
+
+  it("counts a reversal only in the period where it occurred", () => {
+    // Debit in T1, reversal in NOW: the T1-only period sees the debit alone.
+    expect(
+      sumPeriodUsage(transactions, "cust_1", { from: T1, to: T1 })
+    ).toBe(-250);
+    // The NOW-only period sees the reversal alone (net restoration).
+    expect(
+      sumPeriodUsage(transactions, "cust_1", { from: NOW, to: NOW })
+    ).toBe(250);
+  });
+
+  it("narrows by agent product", () => {
+    expect(
+      sumPeriodUsage(transactions, "cust_1", {}, {
+        agentProductId: "agent_sentinel",
+      })
+    ).toBe(0);
+    expect(
+      sumPeriodUsage(transactions, "cust_1", {}, {
+        agentProductId: "agent_mercator",
+      })
+    ).toBe(-100);
+  });
+
+  it("narrows by transaction type", () => {
+    expect(
+      sumPeriodUsage(transactions, "cust_1", {}, { type: "usage_debit" })
+    ).toBe(-350);
+    expect(
+      sumPeriodUsage(transactions, "cust_1", {}, { type: "reversal" })
+    ).toBe(250);
+    expect(
+      sumPeriodUsage(transactions, "cust_1", {}, { type: "credit_grant" })
+    ).toBe(0);
+  });
+
+  it("ignores other customers' usage", () => {
+    const mixed: LedgerTransaction[] = [
+      ...transactions,
+      usageDebit({
+        id: "txn_usage_other",
+        customerId: "cust_2",
+        occurredAt: T1,
+        amountTokens: -999,
+        agentProductId: "agent_sentinel",
+      }),
+    ];
+    expect(sumPeriodUsage(mixed, "cust_1", {})).toBe(-100);
+  });
+
+  it("throws for an inverted date range", () => {
+    expect(() =>
+      sumPeriodUsage(transactions, "cust_1", { from: T2, to: T1 })
+    ).toThrow(/From date must be on or before To date/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// groupUsageByAgent
+// ---------------------------------------------------------------------------
+
+describe("groupUsageByAgent", () => {
+  const transactions: LedgerTransaction[] = [
+    credit({ id: "txn_credit_1", occurredAt: T0, amountTokens: 1000 }),
+    usageDebit({
+      id: "txn_usage_1",
+      occurredAt: T1,
+      amountTokens: -250,
+      agentProductId: "agent_sentinel",
+    }),
+    usageDebit({
+      id: "txn_usage_2",
+      occurredAt: T2,
+      amountTokens: -100,
+      agentProductId: "agent_mercator",
+    }),
+    reversal({
+      id: "txn_reversal_1",
+      occurredAt: NOW,
+      amountTokens: 250,
+      reversesTransactionId: "txn_usage_1",
+    }),
+  ];
+  const agentNames = new Map([
+    ["agent_sentinel", "Sentinel"],
+    ["agent_mercator", "Mercator"],
+  ]);
+
+  it("returns an empty breakdown when no usage effects exist", () => {
+    expect(groupUsageByAgent([], "cust_1", {})).toEqual([]);
+  });
+
+  it("groups per-agent net usage effects", () => {
+    expect(groupUsageByAgent(transactions, "cust_1", {}, agentNames)).toEqual([
+      { agentProductId: "agent_mercator", netTokensConsumed: -100 },
+      { agentProductId: "agent_sentinel", netTokensConsumed: 0 },
+    ]);
+  });
+
+  it("orders highest consumption first", () => {
+    const rows = groupUsageByAgent(transactions, "cust_1", {}, agentNames);
+    // Sentinel nets zero (fully reversed); Mercator consumed 100, so Mercator
+    // (most negative) leads the breakdown.
+    expect(rows[0].agentProductId).toBe("agent_mercator");
+    expect(rows[1].agentProductId).toBe("agent_sentinel");
+  });
+
+  it("breaks ties by agent name", () => {
+    const tied: LedgerTransaction[] = [
+      usageDebit({
+        id: "txn_usage_1",
+        occurredAt: T1,
+        amountTokens: -100,
+        agentProductId: "agent_sentinel",
+      }),
+      usageDebit({
+        id: "txn_usage_2",
+        occurredAt: T2,
+        amountTokens: -100,
+        agentProductId: "agent_mercator",
+      }),
+    ];
+    const rows = groupUsageByAgent(tied, "cust_1", {}, agentNames);
+    expect(rows.map((row) => row.agentProductId)).toEqual([
+      "agent_mercator",
+      "agent_sentinel",
+    ]);
+  });
+
+  it("falls back to the agent product id for ties without names", () => {
+    const tied: LedgerTransaction[] = [
+      usageDebit({
+        id: "txn_usage_1",
+        occurredAt: T1,
+        amountTokens: -100,
+        agentProductId: "agent_sentinel",
+      }),
+      usageDebit({
+        id: "txn_usage_2",
+        occurredAt: T2,
+        amountTokens: -100,
+        agentProductId: "agent_mercator",
+      }),
+    ];
+    const rows = groupUsageByAgent(tied, "cust_1", {});
+    expect(rows.map((row) => row.agentProductId)).toEqual([
+      "agent_mercator",
+      "agent_sentinel",
+    ]);
+  });
+
+  it("keeps a fully reversed debit at zero net", () => {
+    const pair: LedgerTransaction[] = [
+      usageDebit({
+        id: "txn_usage_1",
+        occurredAt: T1,
+        amountTokens: -250,
+        agentProductId: "agent_sentinel",
+      }),
+      reversal({
+        id: "txn_reversal_1",
+        occurredAt: T2,
+        amountTokens: 250,
+        reversesTransactionId: "txn_usage_1",
+      }),
+    ];
+    expect(groupUsageByAgent(pair, "cust_1", {}, agentNames)).toEqual([
+      { agentProductId: "agent_sentinel", netTokensConsumed: 0 },
+    ]);
+  });
+
+  it("narrows by agent product", () => {
+    expect(
+      groupUsageByAgent(transactions, "cust_1", {}, agentNames, {
+        agentProductId: "agent_mercator",
+      })
+    ).toEqual([
+      { agentProductId: "agent_mercator", netTokensConsumed: -100 },
+    ]);
+  });
+
+  it("throws for an inverted date range", () => {
+    expect(() =>
+      groupUsageByAgent(transactions, "cust_1", { from: T2, to: T1 })
+    ).toThrow(/From date must be on or before To date/);
   });
 });

@@ -5,6 +5,7 @@ import {
   type StorageLike,
 } from "@/data/local-storage-repository";
 import { AGENT_PRODUCTS, SEED_NOW } from "@/data/seed-data";
+import { usageDebitTransactionId } from "@/domain/ledger-rules";
 import type { DataStore, DataStoreV1 } from "@/domain/types";
 
 /**
@@ -579,10 +580,12 @@ describe("recordUsageDebit", () => {
       usageRecordId: result.usage.id,
       agentProductId: "agent_sentinel",
     });
-    // Both records land in the same persisted write.
+    // Both records land in the same persisted write: the three seeded usage
+    // records plus this one, and the six seeded ledger transactions plus the
+    // new usage debit.
     const persisted = readPersistedStore(storage);
-    expect(persisted.usageRecords).toHaveLength(1);
-    expect(persisted.ledgerTransactions).toHaveLength(2);
+    expect(persisted.usageRecords).toHaveLength(4);
+    expect(persisted.ledgerTransactions).toHaveLength(7);
     expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
   });
 
@@ -620,9 +623,11 @@ describe("recordUsageDebit", () => {
         SEED_NOW
       )
     ).toThrow(/Insufficient token balance/);
+    // The rejected debit is never written: only the three seeded usage records
+    // and six seeded ledger transactions remain.
     const persisted = readPersistedStore(storage);
-    expect(persisted.usageRecords).toHaveLength(0);
-    expect(persisted.ledgerTransactions).toHaveLength(1);
+    expect(persisted.usageRecords).toHaveLength(3);
+    expect(persisted.ledgerTransactions).toHaveLength(6);
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
   });
 
@@ -821,5 +826,237 @@ describe("deleteCustomer ledger cascade", () => {
       persisted.usageRecords.some((u) => u.customerId === "cust_meridians")
     ).toBe(false);
     expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+  });
+});
+
+describe("getAccountStatement", () => {
+  it("returns newest-first rows with full-account running balances", () => {
+    const { repository } = createInMemoryRepository();
+    const rows = repository.getAccountStatement("cust_meridians");
+
+    expect(rows).toHaveLength(6);
+    const dates = rows.map((row) => Date.parse(row.transaction.occurredAt));
+    expect([...dates].sort((a, b) => b - a)).toEqual(dates);
+
+    // Balances are derived once in ascending order, then the display list is
+    // reversed. These are full-account balances, never filtered subtotals.
+    expect(rows.map((row) => row.resultingBalanceTokens)).toEqual([
+      250000, // 2026-07-01 credit grant
+      248000, // 2026-06-21 reversal of the duplicate usage debit
+      246500, // 2026-06-20 usage debit
+      248000, // 2026-06-02 usage debit
+      248800, // 2026-05-14 usage debit
+      250000, // 2026-04-11 opening credit
+    ]);
+  });
+
+  it("exposes type, signed amount, reference, and reversal detail per row", () => {
+    const { repository } = createInMemoryRepository();
+    const rows = repository.getAccountStatement("cust_meridians");
+
+    const reversalRow = rows.find((row) => row.transaction.kind === "reversal");
+    expect(reversalRow?.transaction.amountTokens).toBe(1500);
+    expect(
+      reversalRow?.transaction.kind === "reversal"
+        ? reversalRow.transaction.reversesTransactionId
+        : null
+    ).toBe(usageDebitTransactionId("usage_meridians_jun_003"));
+
+    const usageRows = rows.filter(
+      (row) => row.transaction.kind === "usage_debit"
+    );
+    expect(usageRows).toHaveLength(3);
+    expect(
+      usageRows.every(
+        (row) =>
+          row.transaction.kind === "usage_debit" &&
+          row.transaction.amountTokens < 0 &&
+          row.transaction.agentProductId.length > 0
+      )
+    ).toBe(true);
+    expect(rows.every((row) => row.transaction.reference.length > 0)).toBe(
+      true
+    );
+  });
+
+  it("returns an empty statement for a customer without ledger history", () => {
+    const { repository } = createInMemoryRepository();
+    expect(repository.getAccountStatement("cust_northwind")).toEqual([]);
+    expect(repository.getAccountStatement("cust_missing")).toEqual([]);
+  });
+
+  it("is read-only and never persists a write", () => {
+    const { repository, storage } = createInMemoryRepository();
+    const before = storage.getItem(STORAGE_KEY);
+    repository.getAccountStatement("cust_meridians");
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
+  });
+});
+
+describe("getUsageSummary", () => {
+  it("returns the full statement, net consumption, and per-agent breakdown", () => {
+    const { repository } = createInMemoryRepository();
+    const summary = repository.getUsageSummary("cust_meridians", {});
+
+    expect(summary.customerId).toBe("cust_meridians");
+    expect(summary.rows).toHaveLength(6);
+    // -1200 (sentinel) - 800 (mercator) - 1500 (sentinel) + 1500 (reversal).
+    expect(summary.netTokensConsumed).toBe(-2000);
+    // Ordered highest consumption first (most negative net first).
+    expect(summary.perAgent).toEqual([
+      {
+        agentProductId: "agent_sentinel",
+        netTokensConsumed: -1200,
+        agentName: "Sentinel",
+      },
+      {
+        agentProductId: "agent_mercator",
+        netTokensConsumed: -800,
+        agentName: "Mercator",
+      },
+    ]);
+  });
+
+  it("applies an inclusive date range and nets a reversed debit to zero", () => {
+    const { repository } = createInMemoryRepository();
+    const summary = repository.getUsageSummary("cust_meridians", {
+      from: "2026-06-01",
+      to: "2026-06-30",
+    });
+
+    // jun_002 (-800), jun_003 (-1500), and the jun_003 reversal (+1500).
+    expect(summary.netTokensConsumed).toBe(-800);
+    expect(summary.perAgent).toEqual([
+      {
+        agentProductId: "agent_mercator",
+        netTokensConsumed: -800,
+        agentName: "Mercator",
+      },
+      {
+        agentProductId: "agent_sentinel",
+        netTokensConsumed: 0,
+        agentName: "Sentinel",
+      },
+    ]);
+    // Only in-range statement rows are returned, newest first.
+    expect(summary.rows.map((row) => row.transaction.reference)).toEqual([
+      "rev_usage_meridians_jun_003",
+      "usage_meridians_jun_003",
+      "usage_meridians_jun_002",
+    ]);
+  });
+
+  it("keeps rows on both inclusive date boundaries", () => {
+    const { repository } = createInMemoryRepository();
+    const summary = repository.getUsageSummary("cust_meridians", {
+      from: "2026-06-20",
+      to: "2026-06-21",
+    });
+    expect(summary.rows.map((row) => row.transaction.reference)).toEqual([
+      "rev_usage_meridians_jun_003",
+      "usage_meridians_jun_003",
+    ]);
+    expect(summary.netTokensConsumed).toBe(0);
+  });
+
+  it("narrows the statement and summary by agent product", () => {
+    const { repository } = createInMemoryRepository();
+    const summary = repository.getUsageSummary(
+      "cust_meridians",
+      {},
+      "agent_sentinel"
+    );
+
+    // Agent filtering keeps only usage_debit rows for that agent.
+    expect(summary.rows.map((row) => row.transaction.reference)).toEqual([
+      "usage_meridians_jun_003",
+      "usage_meridians_may_001",
+    ]);
+    // The selected-period total still nets that agent's reversal.
+    expect(summary.netTokensConsumed).toBe(-1200);
+    expect(summary.perAgent).toEqual([
+      {
+        agentProductId: "agent_sentinel",
+        netTokensConsumed: -1200,
+        agentName: "Sentinel",
+      },
+    ]);
+  });
+
+  it("narrows the statement and summary by transaction type", () => {
+    const { repository } = createInMemoryRepository();
+    const summary = repository.getUsageSummary(
+      "cust_meridians",
+      {},
+      undefined,
+      "credit_grant"
+    );
+
+    expect(summary.rows.map((row) => row.transaction.reference)).toEqual([
+      "credit_meridians_jul_001",
+      "opening_arr_meridians_prepaid",
+    ]);
+    expect(summary.netTokensConsumed).toBe(0);
+    expect(summary.perAgent).toEqual([]);
+  });
+
+  it("combines date, agent, and transaction-type filters", () => {
+    const { repository } = createInMemoryRepository();
+    const summary = repository.getUsageSummary(
+      "cust_meridians",
+      { from: "2026-05-01", to: "2026-06-30" },
+      "agent_sentinel",
+      "usage_debit"
+    );
+
+    expect(summary.rows.map((row) => row.transaction.reference)).toEqual([
+      "usage_meridians_jun_003",
+      "usage_meridians_may_001",
+    ]);
+    // The type filter excludes the reversal, so the two debits stand alone.
+    expect(summary.netTokensConsumed).toBe(-2700);
+    expect(summary.perAgent).toEqual([
+      {
+        agentProductId: "agent_sentinel",
+        netTokensConsumed: -2700,
+        agentName: "Sentinel",
+      },
+    ]);
+  });
+
+  it("keeps full-account resulting balances when rows are filtered", () => {
+    const { repository } = createInMemoryRepository();
+    const summary = repository.getUsageSummary(
+      "cust_meridians",
+      {},
+      undefined,
+      "usage_debit"
+    );
+    // Full-account balances at each transaction, never a filtered subtotal.
+    expect(summary.rows.map((row) => row.resultingBalanceTokens)).toEqual([
+      246500, 248000, 248800,
+    ]);
+  });
+
+  it("rejects an inverted date range without writing", () => {
+    const { repository, storage } = createInMemoryRepository();
+    const before = storage.getItem(STORAGE_KEY);
+    expect(() =>
+      repository.getUsageSummary("cust_meridians", {
+        from: "2026-07-01",
+        to: "2026-06-01",
+      })
+    ).toThrow(/From date must be on or before To date/);
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
+  });
+
+  it("returns an empty summary for a customer without ledger history", () => {
+    const { repository } = createInMemoryRepository();
+    expect(repository.getUsageSummary("cust_northwind", {})).toEqual({
+      customerId: "cust_northwind",
+      rows: [],
+      netTokensConsumed: 0,
+      perAgent: [],
+    });
   });
 });
