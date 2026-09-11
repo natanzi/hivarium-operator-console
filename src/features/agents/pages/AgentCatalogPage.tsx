@@ -1,5 +1,5 @@
 import { Boxes } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/layout/Layout";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PLAN_LABELS } from "@/data/seed-data";
 import { useRepository } from "@/data/repository-context";
 import type { AgentProduct, PlanTier } from "@/domain/types";
@@ -20,10 +21,22 @@ import type { AgentProduct, PlanTier } from "@/domain/types";
  *
  * Renders every agent product in the repository as a card. The catalog is
  * static (versioned separately) so the screen only reads; it never mutates.
+ * Reads flow through the asynchronous {@link HiveRepository}: the page shows
+ * a skeleton while loading.
  */
 export function AgentCatalogPage() {
   const repo = useRepository();
-  const products = useMemo(() => repo.listAgentProducts(), [repo]);
+  const [products, setProducts] = useState<AgentProduct[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void repo.listAgentProducts().then((list) => {
+      if (!cancelled) setProducts(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,7 +46,20 @@ export function AgentCatalogPage() {
         description="Agent products sold through Hivarium, grouped by category. This catalog is read-only."
       />
 
-      {products.length === 0 ? (
+      {products === null ? (
+        <div className="grid gap-4 md:grid-cols-2" data-testid="agents-loading">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div
+              key={index}
+              className="border-border flex flex-col gap-3 rounded-xl border bg-card p-4"
+            >
+              <Skeleton className="h-5 w-1/3" />
+              <Skeleton className="h-4 w-1/4" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ))}
+        </div>
+      ) : products.length === 0 ? (
         <div
           className="text-muted-foreground flex min-h-[30vh] flex-col items-center justify-center gap-2 text-center"
           data-testid="agents-empty"

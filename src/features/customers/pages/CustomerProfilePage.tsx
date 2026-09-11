@@ -1,11 +1,19 @@
-import { ArrowLeft, Building2, Pencil } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
+import { Archive, ArrowLeft, Building2, Pencil } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { useParams } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/Layout";
 import { Avatar, TableFooter } from "@/components/ui/primitives";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable, type DataTableColumn } from "@/data/data-table";
 import {
@@ -16,6 +24,7 @@ import {
 import { useRepository } from "@/data/repository-context";
 import { formatDate } from "@/lib/format";
 import type {
+  ActivityEvent,
   AgentAccessGrant,
   AgentProduct,
   CommercialArrangement,
@@ -23,6 +32,7 @@ import type {
   FeatureEntitlement,
   LedgerTransaction,
 } from "@/domain/types";
+import type { AccountStatementRow } from "@/domain/ledger-rules";
 import type {
   AgentAccessSnapshot,
   CommercialSnapshot,
@@ -51,6 +61,18 @@ import {
   TOUCH_TARGET,
 } from "@/features/customers/components/format";
 
+/** One asynchronous read of every projection the profile composes. */
+interface ProfileData {
+  customer: Customer | undefined;
+  commercialSnapshot: CommercialSnapshot;
+  accessSnapshot: AgentAccessSnapshot;
+  prepaidSnapshot: PrepaidSnapshot;
+  activityEvents: ActivityEvent[];
+  statementRows: AccountStatementRow[];
+  entitlements: FeatureEntitlement[];
+  products: Map<string, AgentProduct>;
+}
+
 /**
  * Customer profile screen.
  *
@@ -59,11 +81,17 @@ import {
  * The Commercial and Agent Access tabs open focused drawers for set/change/
  * review/terminate and grant/revoke workflows; Activity is a semantic
  * newest-first timeline.
+ *
+ * Reads flow through the asynchronous {@link HiveRepository}: the page shows
+ * a skeleton while loading and a restrained error state with Retry that
+ * re-runs the same read. Archived customers render a retention banner and
+ * hide every mutation action while keeping all four tabs readable (D-05).
  */
 export function CustomerProfilePage() {
   const { customerId = "" } = useParams<{ customerId: string }>();
   const repo = useRepository();
-  const [, setRevision] = useState(0);
+  const [data, setData] = useState<ProfileData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [commercialSheetOpen, setCommercialSheetOpen] = useState(false);
   const [accessSheetOpen, setAccessSheetOpen] = useState(false);
   const [addCreditOpen, setAddCreditOpen] = useState(false);
@@ -75,41 +103,132 @@ export function CustomerProfilePage() {
   const [editThresholdOpen, setEditThresholdOpen] = useState(false);
   const addCreditButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  const customer = useMemo(
-    () => repo.getCustomer(customerId),
-    [repo, customerId]
-  );
-  // The repository is synchronous, so snapshots are re-read on every render;
-  // `refresh` bumps the revision state to re-render after a mutation.
-  const commercialSnapshot = repo.getCommercialSnapshot(customerId, SEED_NOW);
-  const accessSnapshot = repo.getAgentAccessSnapshot(customerId, SEED_NOW);
-  const prepaidSnapshot = repo.getPrepaidSnapshot(customerId, SEED_NOW);
-  const activityEvents = repo.listActivityEvents(customerId);
-  // Newest-first statement rows for the Activity tab's Token account
-  // statement. Re-read on every render so mutations refresh the statement.
-  const statementRows = repo.getAccountStatement(customerId);
-  // The statement section appears when prepaid ledger history exists: any
-  // prepaid arrangement (active or historical) or any ledger transactions.
-  const hasPrepaidLedger =
-    statementRows.length > 0 ||
-    commercialSnapshot.history.some(
-      (arrangement) => arrangement.model === "prepaid"
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const customer = await repo.getCustomer(customerId);
+      if (!customer) {
+        setData({
+          customer: undefined,
+          commercialSnapshot: {
+            customerId,
+            asOf: SEED_NOW,
+            active: null,
+            scheduled: null,
+            history: [],
+          },
+          accessSnapshot: {
+            customerId,
+            asOf: SEED_NOW,
+            current: [],
+            scheduled: [],
+            history: [],
+          },
+          prepaidSnapshot: {
+            customerId,
+            asOf: SEED_NOW,
+            arrangement: null,
+            balanceTokens: 0,
+            transactionCount: 0,
+            lowBalance: false,
+          },
+          activityEvents: [],
+          statementRows: [],
+          entitlements: [],
+          products: new Map(),
+        });
+        return;
+      }
+      const [
+        commercialSnapshot,
+        accessSnapshot,
+        prepaidSnapshot,
+        activityEvents,
+        statementRows,
+        entitlements,
+        products,
+      ] = await Promise.all([
+        repo.getCommercialSnapshot(customerId, SEED_NOW),
+        repo.getAgentAccessSnapshot(customerId, SEED_NOW),
+        repo.getPrepaidSnapshot(customerId, SEED_NOW),
+        repo.listActivityEvents(customerId),
+        repo.getAccountStatement(customerId),
+        repo.getFeatureEntitlements(customerId),
+        repo.listAgentProducts(),
+      ]);
+      setData({
+        customer,
+        commercialSnapshot,
+        accessSnapshot,
+        prepaidSnapshot,
+        activityEvents,
+        statementRows,
+        entitlements,
+        products: new Map(products.map((p) => [p.id, p])),
+      });
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : "Could not load customer."
+      );
+    }
+  }, [repo, customerId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const refresh = useCallback(() => {
+    void load();
+  }, [load]);
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          title="Customer profile"
+          id="customer-profile-title"
+          description="Commercial arrangement, agent access, balance and activity for one customer."
+        />
+        <div
+          className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-center"
+          data-testid="profile-error"
+        >
+          <Building2 className="text-muted-foreground size-10" />
+          <h2 className="text-lg font-semibold">Unable to load customer</h2>
+          <p className="text-muted-foreground max-w-sm text-sm">{loadError}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            data-testid="retry-profile"
+          >
+            Retry
+          </Button>
+        </div>
+      </div>
     );
-  // Agent products the customer may currently use, for the Record usage sheet.
-  const availableAgentIds = accessSnapshot.current.map(
-    (grant) => grant.agentProductId
-  );
-  const entitlements = useMemo(
-    () => repo.getFeatureEntitlements(customerId),
-    [repo, customerId]
-  );
-  const products = useMemo(
-    () => new Map(repo.listAgentProducts().map((p) => [p.id, p])),
-    [repo]
-  );
+  }
 
-  const refresh = useCallback(() => setRevision((r) => r + 1), []);
+  if (!data) {
+    return (
+      <div className="flex flex-col gap-6" data-testid="profile-loading">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-1/3" />
+          <Skeleton className="h-8 w-28" />
+        </div>
+        <Skeleton className="h-28 w-full rounded-xl" />
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+        <Skeleton className="h-40 w-full rounded-xl" />
+      </div>
+    );
+  }
 
+  const { customer } = data;
   if (!customer) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
@@ -128,6 +247,20 @@ export function CustomerProfilePage() {
     );
   }
 
+  const isArchived = customer.status === "archived";
+  const { commercialSnapshot, accessSnapshot, prepaidSnapshot } = data;
+  // The statement section appears when prepaid ledger history exists: any
+  // prepaid arrangement (active or historical) or any ledger transactions.
+  const hasPrepaidLedger =
+    data.statementRows.length > 0 ||
+    commercialSnapshot.history.some(
+      (arrangement) => arrangement.model === "prepaid"
+    );
+  // Agent products the customer may currently use, for the Record usage sheet.
+  const availableAgentIds = accessSnapshot.current.map(
+    (grant) => grant.agentProductId
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -135,12 +268,14 @@ export function CustomerProfilePage() {
         id="customer-profile-title"
         description={`${customer.domain} · Customer since ${formatDate(customer.createdAt)}`}
       >
-        <Button variant="outline" size="sm" asChild>
-          <a href={`/customers/${customer.id}/edit`} data-testid="edit-customer-button">
-            <Pencil className="size-4" />
-            Edit customer
-          </a>
-        </Button>
+        {!isArchived ? (
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/customers/${customer.id}/edit`} data-testid="edit-customer-button">
+              <Pencil className="size-4" />
+              Edit customer
+            </a>
+          </Button>
+        ) : null}
         <Button variant="ghost" size="sm" asChild>
           <a href="/customers" data-testid="back-to-customers">
             <ArrowLeft className="size-4" />
@@ -148,6 +283,30 @@ export function CustomerProfilePage() {
           </a>
         </Button>
       </PageHeader>
+
+      {isArchived ? (
+        <section
+          aria-labelledby="archived-banner-heading"
+          className="border-border bg-muted flex items-start gap-2 rounded-xl border px-4 py-3"
+          data-testid="archived-banner"
+        >
+          <Archive
+            className="text-muted-foreground mt-0.5 size-4 shrink-0"
+            aria-hidden="true"
+          />
+          <div>
+            <h2
+              id="archived-banner-heading"
+              className="text-sm font-semibold"
+            >
+              This customer is archived.
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              Records are retained and read-only.
+            </p>
+          </div>
+        </section>
+      ) : null}
 
       <Tabs defaultValue="overview" className="gap-4">
         <TabsList
@@ -173,7 +332,8 @@ export function CustomerProfilePage() {
             snapshot={commercialSnapshot}
             prepaidSnapshot={prepaidSnapshot}
             activeAgentCount={accessSnapshot.current.length}
-            entitlements={entitlements}
+            entitlements={data.entitlements}
+            readOnly={isArchived}
             onSetCommercial={() => setCommercialSheetOpen(true)}
           />
         </TabsContent>
@@ -183,6 +343,7 @@ export function CustomerProfilePage() {
             snapshot={commercialSnapshot}
             prepaidSnapshot={prepaidSnapshot}
             activeGrantCount={accessSnapshot.current.length}
+            readOnly={isArchived}
             onChanged={refresh}
             onChangeCommercial={() => setCommercialSheetOpen(true)}
             onAddCredit={() => setAddCreditOpen(true)}
@@ -195,7 +356,8 @@ export function CustomerProfilePage() {
           <AgentAccessPanel
             customer={customer}
             snapshot={accessSnapshot}
-            products={products}
+            products={data.products}
+            readOnly={isArchived}
             onChanged={refresh}
             onGrantAccess={() => setAccessSheetOpen(true)}
           />
@@ -205,9 +367,10 @@ export function CustomerProfilePage() {
             <TokenStatement
               customer={customer}
               balanceTokens={prepaidSnapshot.balanceTokens}
-              statementRows={statementRows}
-              products={products}
+              statementRows={data.statementRows}
+              products={data.products}
               activePrepaid={prepaidSnapshot.arrangement !== null}
+              readOnly={isArchived}
               onRecordUsage={() => setUsageOpen(true)}
               onAddCredit={() => setAddCreditOpen(true)}
               onReverseTransaction={(transaction) => {
@@ -216,67 +379,71 @@ export function CustomerProfilePage() {
               }}
             />
           ) : null}
-          <ActivityTimeline events={activityEvents} products={products} />
+          <ActivityTimeline events={data.activityEvents} products={data.products} />
         </TabsContent>
       </Tabs>
 
-      <CommercialArrangementSheet
-        customer={customer}
-        snapshot={commercialSnapshot}
-        open={commercialSheetOpen}
-        onOpenChange={setCommercialSheetOpen}
-        onSaved={refresh}
-      />
-      <AgentAccessSheet
-        customer={customer}
-        snapshot={accessSnapshot}
-        products={products}
-        open={accessSheetOpen}
-        onOpenChange={setAccessSheetOpen}
-        onSaved={refresh}
-      />
-      <AddCreditSheet
-        customer={customer}
-        balanceTokens={prepaidSnapshot.balanceTokens}
-        open={addCreditOpen}
-        onOpenChange={setAddCreditOpen}
-        onSaved={refresh}
-        addCreditButtonRef={addCreditButtonRef}
-      />
-      <AdjustmentSheet
-        customer={customer}
-        balanceTokens={prepaidSnapshot.balanceTokens}
-        open={adjustmentOpen}
-        onOpenChange={setAdjustmentOpen}
-        onSaved={refresh}
-      />
-      <RecordUsageSheet
-        customer={customer}
-        balanceTokens={prepaidSnapshot.balanceTokens}
-        products={products}
-        availableAgentIds={availableAgentIds}
-        open={usageOpen}
-        onOpenChange={setUsageOpen}
-        onSaved={refresh}
-      />
-      {reversalTarget ? (
-        <ReversalSheet
-          customer={customer}
-          transaction={reversalTarget}
-          balanceTokens={prepaidSnapshot.balanceTokens}
-          open={reversalOpen}
-          onOpenChange={setReversalOpen}
-          onSaved={refresh}
-        />
-      ) : null}
-      {prepaidSnapshot.arrangement ? (
-        <EditThresholdSheet
-          customer={customer}
-          arrangement={prepaidSnapshot.arrangement}
-          open={editThresholdOpen}
-          onOpenChange={setEditThresholdOpen}
-          onSaved={refresh}
-        />
+      {!isArchived ? (
+        <>
+          <CommercialArrangementSheet
+            customer={customer}
+            snapshot={commercialSnapshot}
+            open={commercialSheetOpen}
+            onOpenChange={setCommercialSheetOpen}
+            onSaved={refresh}
+          />
+          <AgentAccessSheet
+            customer={customer}
+            snapshot={accessSnapshot}
+            products={data.products}
+            open={accessSheetOpen}
+            onOpenChange={setAccessSheetOpen}
+            onSaved={refresh}
+          />
+          <AddCreditSheet
+            customer={customer}
+            balanceTokens={prepaidSnapshot.balanceTokens}
+            open={addCreditOpen}
+            onOpenChange={setAddCreditOpen}
+            onSaved={refresh}
+            addCreditButtonRef={addCreditButtonRef}
+          />
+          <AdjustmentSheet
+            customer={customer}
+            balanceTokens={prepaidSnapshot.balanceTokens}
+            open={adjustmentOpen}
+            onOpenChange={setAdjustmentOpen}
+            onSaved={refresh}
+          />
+          <RecordUsageSheet
+            customer={customer}
+            balanceTokens={prepaidSnapshot.balanceTokens}
+            products={data.products}
+            availableAgentIds={availableAgentIds}
+            open={usageOpen}
+            onOpenChange={setUsageOpen}
+            onSaved={refresh}
+          />
+          {reversalTarget ? (
+            <ReversalSheet
+              customer={customer}
+              transaction={reversalTarget}
+              balanceTokens={prepaidSnapshot.balanceTokens}
+              open={reversalOpen}
+              onOpenChange={setReversalOpen}
+              onSaved={refresh}
+            />
+          ) : null}
+          {prepaidSnapshot.arrangement ? (
+            <EditThresholdSheet
+              customer={customer}
+              arrangement={prepaidSnapshot.arrangement}
+              open={editThresholdOpen}
+              onOpenChange={setEditThresholdOpen}
+              onSaved={refresh}
+            />
+          ) : null}
+        </>
       ) : null}
 
       <TableFooter backTo="/customers" backLabel="All customers" />
@@ -294,6 +461,7 @@ function OverviewPanel({
   prepaidSnapshot,
   activeAgentCount,
   entitlements,
+  readOnly,
   onSetCommercial,
 }: {
   customer: Customer;
@@ -301,6 +469,7 @@ function OverviewPanel({
   prepaidSnapshot: PrepaidSnapshot;
   activeAgentCount: number;
   entitlements: FeatureEntitlement[];
+  readOnly: boolean;
   onSetCommercial: () => void;
 }) {
   const active = snapshot.active;
@@ -361,15 +530,17 @@ function OverviewPanel({
             value={String(activeAgentCount)}
           />
         </dl>
-        <div className="mt-4">
-          <Button
-            onClick={onSetCommercial}
-            data-testid="overview-commercial-action"
-            className={TOUCH_TARGET}
-          >
-            {active ? "Change commercial model" : "Set commercial model"}
-          </Button>
-        </div>
+        {!readOnly ? (
+          <div className="mt-4">
+            <Button
+              onClick={onSetCommercial}
+              data-testid="overview-commercial-action"
+              className={TOUCH_TARGET}
+            >
+              {active ? "Change commercial model" : "Set commercial model"}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div className="text-sm max-w-2xl leading-relaxed text-foreground/90">
@@ -466,6 +637,7 @@ function CommercialPanel({
   snapshot,
   prepaidSnapshot,
   activeGrantCount,
+  readOnly,
   onChanged,
   onChangeCommercial,
   onAddCredit,
@@ -477,6 +649,7 @@ function CommercialPanel({
   snapshot: CommercialSnapshot;
   prepaidSnapshot: PrepaidSnapshot;
   activeGrantCount: number;
+  readOnly: boolean;
   onChanged: () => void;
   onChangeCommercial: () => void;
   onAddCredit: () => void;
@@ -495,6 +668,7 @@ function CommercialPanel({
         <ArrangementCard
           arrangement={snapshot.active}
           prepaidSnapshot={prepaidSnapshot}
+          readOnly={readOnly}
           onChange={onChangeCommercial}
           onTerminate={() => setTerminateTarget(snapshot.active)}
           onAddCredit={onAddCredit}
@@ -521,14 +695,16 @@ function CommercialPanel({
               {modelLabel(snapshot.scheduled.model)}
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onChangeCommercial}
-            data-testid="review-scheduled-change"
-          >
-            Review scheduled change
-          </Button>
+          {!readOnly ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onChangeCommercial}
+              data-testid="review-scheduled-change"
+            >
+              Review scheduled change
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -576,6 +752,7 @@ function CommercialPanel({
 function ArrangementCard({
   arrangement,
   prepaidSnapshot,
+  readOnly,
   onChange,
   onTerminate,
   onAddCredit,
@@ -585,6 +762,7 @@ function ArrangementCard({
 }: {
   arrangement: CommercialArrangement;
   prepaidSnapshot: PrepaidSnapshot;
+  readOnly: boolean;
   onChange: () => void;
   onTerminate: () => void;
   onAddCredit: () => void;
@@ -620,53 +798,55 @@ function ArrangementCard({
             {arrangement.status}
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {arrangement.model === "prepaid" ? (
-            <>
-              <Button
-                variant="default"
-                size="sm"
-                className="bg-[#9A4B23] text-white hover:bg-[#9A4B23]/90"
-                onClick={onAddCredit}
-                ref={addCreditButtonRef}
-              >
-                Add credit
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onAdjustBalance}
-                data-testid="adjust-balance"
-              >
-                Adjust balance
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onEditThreshold}
-              >
-                Edit threshold
-              </Button>
-            </>
-          ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onChange}
-            data-testid="change-commercial-model"
-          >
-            Change commercial model
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:bg-destructive/10"
-            onClick={onTerminate}
-            data-testid="terminate-arrangement"
-          >
-            Terminate arrangement
-          </Button>
-        </div>
+        {!readOnly ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {arrangement.model === "prepaid" ? (
+              <>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="bg-[#9A4B23] text-white hover:bg-[#9A4B23]/90"
+                  onClick={onAddCredit}
+                  ref={addCreditButtonRef}
+                >
+                  Add credit
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onAdjustBalance}
+                  data-testid="adjust-balance"
+                >
+                  Adjust balance
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onEditThreshold}
+                >
+                  Edit threshold
+                </Button>
+              </>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onChange}
+              data-testid="change-commercial-model"
+            >
+              Change commercial model
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10"
+              onClick={onTerminate}
+              data-testid="terminate-arrangement"
+            >
+              Terminate arrangement
+            </Button>
+          </div>
+        ) : null}
       </div>
       <dl className="mt-3 grid gap-3 sm:grid-cols-3">
         {arrangementTerms(arrangement, prepaidSnapshot)}
@@ -817,12 +997,14 @@ function AgentAccessPanel({
   customer,
   snapshot,
   products,
+  readOnly,
   onChanged,
   onGrantAccess,
 }: {
   customer: Customer;
   snapshot: AgentAccessSnapshot;
   products: Map<string, AgentProduct>;
+  readOnly: boolean;
   onChanged: () => void;
   onGrantAccess: () => void;
 }) {
@@ -834,13 +1016,15 @@ function AgentAccessPanel({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-sm font-semibold">Current access</h3>
-        <Button
-          onClick={onGrantAccess}
-          data-testid="grant-agent-access"
-          className={TOUCH_TARGET}
-        >
-          Grant agent access
-        </Button>
+        {!readOnly ? (
+          <Button
+            onClick={onGrantAccess}
+            data-testid="grant-agent-access"
+            className={TOUCH_TARGET}
+          >
+            Grant agent access
+          </Button>
+        ) : null}
       </div>
       {snapshot.current.length > 0 ? (
         <ul className="flex flex-col gap-2">
@@ -850,6 +1034,7 @@ function AgentAccessPanel({
               grant={grant}
               products={products}
               status="active"
+              readOnly={readOnly}
               onRevoke={() => setRevokeTarget(grant)}
             />
           ))}
@@ -871,6 +1056,7 @@ function AgentAccessPanel({
                 grant={grant}
                 products={products}
                 status="scheduled"
+                readOnly={readOnly}
               />
             ))}
           </ul>
@@ -887,6 +1073,7 @@ function AgentAccessPanel({
                 grant={grant}
                 products={products}
                 status={grant.revokedAt !== null ? "revoked" : "expired"}
+                readOnly={readOnly}
               />
             ))}
           </ul>
@@ -913,11 +1100,13 @@ function GrantRow({
   grant,
   products,
   status,
+  readOnly,
   onRevoke,
 }: {
   grant: AgentAccessGrant;
   products: Map<string, AgentProduct>;
   status: "active" | "scheduled" | "expired" | "revoked";
+  readOnly: boolean;
   onRevoke?: () => void;
 }) {
   const product = products.get(grant.agentProductId);
@@ -961,7 +1150,7 @@ function GrantRow({
         >
           {status}
         </span>
-        {status === "active" && onRevoke ? (
+        {status === "active" && !readOnly && onRevoke ? (
           <Button
             variant="ghost"
             size="sm"

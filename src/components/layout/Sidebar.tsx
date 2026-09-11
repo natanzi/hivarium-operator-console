@@ -1,4 +1,5 @@
-import { Boxes, Info, LogOut, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Boxes, Info, LogOut, ShieldAlert, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -14,6 +15,9 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { useRepository } from "@/data/repository-context";
+import { ApiError } from "@/data/api-repository";
+import type { OperatorIdentity } from "@/data/local-storage-repository";
 
 export interface NavLink {
   to: string;
@@ -31,11 +35,46 @@ interface SidebarProps {
   className?: string;
 }
 
+type OperatorState =
+  | { status: "loading" }
+  | { status: "signed-in"; operator: OperatorIdentity }
+  | { status: "sign-in-required" }
+  | { status: "error" };
+
 /**
  * App navigation sidebar. Rendered inside a `SidebarProvider` (see Layout) so
  * it can collapse into an off-canvas drawer on desktop and a sheet on mobile.
+ *
+ * On mount it resolves the current operator via `repository.getCurrentOperator()`
+ * (which calls `GET /api/me` on the API-backed repository) so the footer can
+ * show "Signed in as {email}". A 401 renders a sign-in-required state instead.
  */
 export function AppSidebar({ className }: SidebarProps) {
+  const repository = useRepository();
+  const [operator, setOperator] = useState<OperatorState>({
+    status: "loading",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    repository
+      .getCurrentOperator()
+      .then((identity) => {
+        if (!cancelled) setOperator({ status: "signed-in", operator: identity });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 401) {
+          setOperator({ status: "sign-in-required" });
+        } else {
+          setOperator({ status: "error" });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repository]);
+
   return (
     <Sidebar className={className}>
       <SidebarHeader>
@@ -97,17 +136,57 @@ export function AppSidebar({ className }: SidebarProps) {
           </SidebarMenu>
 
           <div className="text-muted-foreground mt-3 border-t border-sidebar-border px-2 pt-3 text-xs">
-            <p className="font-medium">Phase 1 · Local data</p>
-            <p className="mt-1 leading-relaxed opacity-80">
-              Records persist to this browser&apos;s localStorage. Reset anytime
-              from the Customers screen.
-            </p>
+            <OperatorFooter state={operator} />
           </div>
         </div>
       </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>
+  );
+}
+
+function OperatorFooter({ state }: { state: OperatorState }) {
+  if (state.status === "loading") {
+    return (
+      <p className="leading-relaxed opacity-80" data-testid="operator-loading">
+        Checking session…
+      </p>
+    );
+  }
+
+  if (state.status === "sign-in-required") {
+    return (
+      <div
+        className="flex items-start gap-2 leading-relaxed"
+        data-testid="sign-in-required"
+      >
+        <ShieldAlert className="mt-0.5 size-3.5 shrink-0 opacity-70" />
+        <p>
+          <span className="font-medium">Sign-in required.</span>{" "}
+          <span className="opacity-80">
+            Re-authenticate through Cloudflare Access to continue.
+          </span>
+        </p>
+      </div>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <p className="leading-relaxed opacity-80" data-testid="operator-error">
+        Could not verify your session.
+      </p>
+    );
+  }
+
+  return (
+    <div className="leading-relaxed" data-testid="signed-in-as">
+      <p className="font-medium">Signed in as</p>
+      <p className="mt-0.5 truncate opacity-80" data-testid="operator-email">
+        {state.operator.email}
+      </p>
+    </div>
   );
 }
 

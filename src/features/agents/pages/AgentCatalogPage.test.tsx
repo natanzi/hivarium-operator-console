@@ -25,27 +25,31 @@ describe("AgentCatalogPage", () => {
     expect(screen.getByTestId("page-title").textContent).toBe("Agent Catalog");
   });
 
-  it("renders a card for every seeded agent product", () => {
+  it("renders a card for every seeded agent product", async () => {
     renderCatalog();
-    expect(screen.getByTestId("agent-card-agent_sentinel")).toBeInTheDocument();
-    expect(screen.getByTestId("agent-card-agent_vanguard")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("agent-card-agent_sentinel")
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("agent-card-agent_vanguard")
+    ).toBeInTheDocument();
   });
 
-  it("shows the product version and plans", () => {
+  it("shows the product version and plans", async () => {
     renderCatalog();
-    const card = screen.getByTestId("agent-card-agent_sentinel");
+    const card = await screen.findByTestId("agent-card-agent_sentinel");
     expect(card.textContent).toContain("v2.4.1");
     expect(card.textContent).toContain("Security");
-    expect(screen.getByTestId("agent-plans-agent_sentinel").textContent).toContain(
-      "Growth"
-    );
+    expect(
+      (await screen.findByTestId("agent-plans-agent_sentinel")).textContent
+    ).toContain("Growth");
   });
 
-  it("links every card to its agent detail route", () => {
+  it("links every card to its agent detail route", async () => {
     renderCatalog();
-    const sentinelLink = screen.getByTestId("agent-link-agent_sentinel");
+    const sentinelLink = await screen.findByTestId("agent-link-agent_sentinel");
     expect(sentinelLink).toHaveAttribute("href", "/agents/agent_sentinel");
-    const vanguardLink = screen.getByTestId("agent-link-agent_vanguard");
+    const vanguardLink = await screen.findByTestId("agent-link-agent_vanguard");
     expect(vanguardLink).toHaveAttribute("href", "/agents/agent_vanguard");
   });
 });

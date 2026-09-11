@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, UserPlus } from "lucide-react";
 import { useNavigate } from "react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -71,13 +71,27 @@ export function CreateCustomerPage() {
     () => (name.trim().length > 0 ? makeCustomerId(name) : ""),
     [name]
   );
-  const duplicateId =
-    submitId.length > 0 && repo.getCustomer(submitId) !== undefined;
+  // The duplicate check reads the repository asynchronously, so the derived-id
+  // note appears once the lookup resolves (and clears when the name changes).
+  const [duplicateId, setDuplicateId] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (submitId.length === 0) {
+      setDuplicateId(false);
+      return;
+    }
+    void repo.getCustomer(submitId).then((existing) => {
+      if (!cancelled) setDuplicateId(existing !== undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo, submitId]);
 
-  function onSubmit(values: CustomerFormValues) {
+  async function onSubmit(values: CustomerFormValues) {
     const id = makeCustomerId(values.name);
     try {
-      const created = repo.createCustomer({ ...values, id });
+      const created = await repo.createCustomer({ ...values, id });
       toast.success(`Customer "${created.name}" created`);
       navigate(`/customers/${created.id}`);
     } catch (err) {

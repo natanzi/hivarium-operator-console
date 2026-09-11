@@ -1,0 +1,77 @@
+import { env, SELF } from "cloudflare:test";
+import { afterEach, it, vi } from "vitest";
+
+const TEAM_DOMAIN = "example.cloudflareaccess.com";
+const AUDIENCE = "replace-with-access-application-aud";
+
+function base64UrlEncode(input: string | Uint8Array | ArrayBuffer): string {
+  const bytes =
+    typeof input === "string"
+      ? new TextEncoder().encode(input)
+      : input instanceof Uint8Array
+        ? input
+        : new Uint8Array(input);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function createSigner(kid = "test-key-1") {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"]
+  );
+  const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+  const jwks = { keys: [{ ...publicJwk, kid, alg: "RS256", use: "sig" }] };
+  const sign = async (claims: Record<string, unknown>): Promise<string> => {
+    const header = { alg: "RS256", kid, typ: "JWT" };
+    const headerB64 = base64UrlEncode(JSON.stringify(header));
+    const payloadB64 = base64UrlEncode(JSON.stringify(claims));
+    const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+    const signature = await crypto.subtle.sign(
+      "RSASSA-PKCS1-v1_5",
+      keyPair.privateKey,
+      data
+    );
+    return `${headerB64}.${payloadB64}.${base64UrlEncode(signature)}`;
+  };
+  return { jwks, sign };
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+it("probes authenticated /api/me through SELF.fetch", async () => {
+  const { jwks, sign } = await createSigner();
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("cloudflareaccess.com/cdn-cgi/access/certs")) {
+      return new Response(JSON.stringify(jwks), { status: 200 });
+    }
+    return new Response("not mocked", { status: 404 });
+  });
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const token = await sign({
+    iss: `https://${TEAM_DOMAIN}`,
+    aud: AUDIENCE,
+    exp: nowSeconds + 3600,
+    nbf: nowSeconds - 60,
+    email: "operator@hivarium.test",
+    sub: "user_123",
+    name: "Test Operator",
+  });
+
+  const response = await SELF.fetch("https://example.com/api/me", {
+    headers: { "Cf-Access-Jwt-Assertion": token },
+  });
+  console.log("me status:", response.status);
+  console.log("me body:", await response.text());
+});

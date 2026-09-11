@@ -393,7 +393,7 @@ export function CommercialArrangementSheet({
       );
     }
     try {
-      repo.saveCommercialArrangement(input, occurredAt);
+      await repo.saveCommercialArrangement(input, occurredAt);
       toast.success(
         submitted.effective === "now"
           ? "Commercial model started"
@@ -402,10 +402,12 @@ export function CommercialArrangementSheet({
       form.reset(defaultValuesFor(snapshot));
       onSaved();
       onOpenChange(false);
-    } catch {
-      toast.error(
-        "Commercial changes were not saved. Review the highlighted fields and try again."
-      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Commercial changes were not saved. Review the highlighted fields and try again.";
+      toast.error(message);
     }
   }
 
@@ -839,7 +841,7 @@ export function TerminateArrangementDialog({
     setSubmitting(true);
     await new Promise((resolve) => setTimeout(resolve, 0));
     try {
-      repo.terminateCommercialArrangement(
+      await repo.terminateCommercialArrangement(
         {
           arrangementId: arrangement.id,
           customerId: customer.id,
@@ -850,10 +852,12 @@ export function TerminateArrangementDialog({
       toast.success("Commercial arrangement terminated");
       onTerminated();
       onOpenChange(false);
-    } catch {
-      toast.error(
-        "Commercial changes were not saved. Review the highlighted fields and try again."
-      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Commercial changes were not saved. Review the highlighted fields and try again.";
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }

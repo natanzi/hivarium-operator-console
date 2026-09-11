@@ -141,7 +141,7 @@ function buildStore(
   usageRecords: UsageRecord[] = []
 ): DataStore {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     customers: [],
     featureEntitlements: [],
     agentProducts: [],

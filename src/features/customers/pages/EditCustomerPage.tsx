@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, Save } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
-import { useMemo } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -32,10 +32,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { CUSTOMER_STATUS_LABELS } from "@/data/seed-data";
 import { useRepository } from "@/data/repository-context";
-import type { CustomerStatus } from "@/domain/types";
+import type { Customer, CustomerStatus } from "@/domain/types";
 
 /** Form values produced by {@link customerSchema} (id is preserved on submit). */
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -43,7 +44,8 @@ type CustomerFormValues = z.infer<typeof customerSchema>;
 /**
  * Edit-customer screen.
  *
- * Loads the customer by id, pre-fills the form, and on submit persists the
+ * Loads the customer by id through the asynchronous {@link HiveRepository}
+ * (skeleton while loading), pre-fills the form, and on submit persists the
  * changes through the repository's `updateCustomer` before navigating back to
  * the customer's profile. The id is preserved from the route so edits never
  * clobber a different record.
@@ -52,23 +54,82 @@ export function EditCustomerPage() {
   const { customerId = "" } = useParams<{ customerId: string }>();
   const repo = useRepository();
   const navigate = useNavigate();
-
-  const customer = useMemo(
-    () => repo.getCustomer(customerId),
-    [repo, customerId]
+  // `undefined` means still loading; `null` means the customer does not exist.
+  const [customer, setCustomer] = useState<Customer | null | undefined>(
+    undefined
   );
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      // `undefined` means still loading; `null` means the customer does not
+      // exist. Normalize the repository's `undefined` miss to `null` so the
+      // state change actually triggers a re-render into the not-found state.
+      setCustomer((await repo.getCustomer(customerId)) ?? null);
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : "Could not load customer."
+      );
+    }
+  }, [repo, customerId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
+    values: customer ? {
+      name: customer.name ?? "",
+      domain: customer.domain ?? "",
+      contact: customer.contact ?? "",
+      email: customer.email ?? "",
+      status: customer.status ?? "evaluation",
+      notes: customer.notes ?? "",
+    } : undefined,
     defaultValues: {
-      name: customer?.name ?? "",
-      domain: customer?.domain ?? "",
-      contact: customer?.contact ?? "",
-      email: customer?.email ?? "",
-      status: customer?.status ?? "evaluation",
-      notes: customer?.notes ?? "",
+      name: "",
+      domain: "",
+      contact: "",
+      email: "",
+      status: "evaluation",
+      notes: "",
     },
   });
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+        <div>
+          <h1 className="text-2xl font-semibold">Unable to load customer</h1>
+          <p className="text-muted-foreground mt-1 max-w-sm text-sm">
+            {loadError}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void load()}
+          data-testid="retry-edit-customer"
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (customer === undefined) {
+    return (
+      <div className="flex flex-col gap-6" data-testid="edit-customer-loading">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-1/3" />
+          <Skeleton className="h-8 w-28" />
+        </div>
+        <Skeleton className="h-96 w-full rounded-xl" />
+      </div>
+    );
+  }
 
   if (!customer) {
     return (
@@ -87,9 +148,12 @@ export function EditCustomerPage() {
     );
   }
 
-  const onSubmit = (values: CustomerFormValues) => {
+  const onSubmit = async (values: CustomerFormValues) => {
     try {
-      const updated = repo.updateCustomer(customer.id, { ...values, id: customer.id });
+      const updated = await repo.updateCustomer(customer.id, {
+        ...values,
+        id: customer.id,
+      });
       toast.success(`Customer "${updated.name}" updated`);
       navigate(`/customers/${updated.id}`);
     } catch (err) {
@@ -123,7 +187,7 @@ export function EditCustomerPage() {
           <Form {...form}>
             <form
               className="flex flex-col gap-5"
-              onSubmit={form.handleSubmit(onSubmit)}
+              onSubmit={form.handleSubmit(onSubmit, (errs) => console.log('EDIT VALIDATION ERRORS:', errs))}
               noValidate
             >
               <FormField
@@ -262,6 +326,6 @@ const customerSchema = z.object({
     .string()
     .min(1, "Email is required.")
     .email("Enter a valid email address."),
-  status: z.enum(["evaluation", "active", "paused", "churned"]),
+  status: z.enum(["evaluation", "active", "paused", "churned", "archived"]),
   notes: z.string().max(2000, "Notes must be under 2000 characters."),
 });

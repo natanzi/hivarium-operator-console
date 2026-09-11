@@ -18,11 +18,9 @@ describe("AboutPage", () => {
     expect(screen.getByTestId("about-card").textContent).toContain("Phase");
   });
 
-  it("reflects the live agent product count from the repository", () => {
-    const count = repository.listAgentProducts().length;
+  it("reflects the live agent product count from the repository", async () => {
+    const count = (await repository.listAgentProducts()).length;
     render(<AboutPage />);
-    expect(screen.getByTestId("about-card").textContent).toContain(
-      String(count)
-    );
+    expect(await screen.findByText(String(count))).toBeInTheDocument();
   });
 });

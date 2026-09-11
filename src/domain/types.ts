@@ -11,7 +11,12 @@
  * records are migration inputs only (see {@link DataStoreV1}).
  */
 
-export type CustomerStatus = "evaluation" | "active" | "paused" | "churned";
+export type CustomerStatus =
+  | "evaluation"
+  | "active"
+  | "paused"
+  | "churned"
+  | "archived";
 
 /**
  * A billing/tenant customer of the Hivarium platform.
@@ -217,7 +222,7 @@ export interface ActivityEvent {
   id: string;
   occurredAt: string;
   source: ActivitySource;
-  type: "commercial.created" | "commercial.ended" | "commercial.terminated" | "access.granted" | "access.revoked";
+  type: "commercial.created" | "commercial.ended" | "commercial.terminated" | "access.granted" | "access.revoked" | "customer.archived";
   /** Customer id for customer-scoped events. */
   customerId: string;
   /** Human-readable action label. */
@@ -335,7 +340,7 @@ export interface UsageRecord {
 // ---------------------------------------------------------------------------
 
 /**
- * Canonical, versioned persisted store (`schemaVersion: 3`).
+ * Canonical, versioned persisted store (`schemaVersion: 4`).
  *
  * `commercialArrangements`, `agentAccessGrants`, `activityEvents`,
  * `ledgerTransactions`, and `usageRecords` are the active generalized
@@ -343,9 +348,13 @@ export interface UsageRecord {
  * to hold shared data. Legacy v1-only collections (`subscriptions`,
  * `agentLicenses`) are intentionally absent; their meaning is carried by the
  * active records after migration.
+ *
+ * Schema v4 adds the `archived` customer lifecycle status (D-05). The v3→v4
+ * migration is deterministic and defaulting: records without an `archived`
+ * status are unchanged.
  */
 export interface DataStore {
-  schemaVersion: 3;
+  schemaVersion: 4;
   customers: Customer[];
   featureEntitlements: FeatureEntitlement[];
   agentProducts: AgentProduct[];
@@ -435,13 +444,14 @@ export interface AgentLicense {
 // ---------------------------------------------------------------------------
 
 /** Current schema version for the persisted store. */
-export const STORE_SCHEMA_VERSION = 3 as const;
+export const STORE_SCHEMA_VERSION = 4 as const;
 
 export const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
   "evaluation",
   "active",
   "paused",
   "churned",
+  "archived",
 ];
 
 const LEGACY_STATUS_ALIASES: Record<string, CustomerStatus> = {
@@ -450,6 +460,7 @@ const LEGACY_STATUS_ALIASES: Record<string, CustomerStatus> = {
   active: "active",
   paused: "paused",
   churned: "churned",
+  archived: "archived",
 };
 
 /**

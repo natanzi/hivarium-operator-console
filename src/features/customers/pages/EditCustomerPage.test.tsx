@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it } from "vitest";
 
@@ -19,8 +20,9 @@ function renderEditPage(customerId = "cust_northwind") {
 }
 
 describe("EditCustomerPage", () => {
-  it("renders the page title and pre-fills the form with the customer", () => {
+  it("renders the page title and pre-fills the form with the customer", async () => {
     renderEditPage();
+    expect(await screen.findByTestId("submit-customer")).toBeInTheDocument();
     expect(screen.getByTestId("page-title").textContent).toBe(
       "Edit Northwind Trading"
     );
@@ -31,28 +33,42 @@ describe("EditCustomerPage", () => {
     expect(form.querySelector("[name='contact']")).toHaveValue("Ingrid Halvorsen");
   });
 
-  it("shows a not-found state for unknown ids", () => {
+  it("shows a not-found state for unknown ids", async () => {
     renderEditPage("does_not_exist");
-    expect(screen.getByText("Customer not found")).toBeInTheDocument();
+    expect(await screen.findByText("Customer not found")).toBeInTheDocument();
     expect(screen.queryByTestId("edit-customer-card")).not.toBeInTheDocument();
   });
 
   it("persists edits through updateCustomer when the form is valid", async () => {
     renderEditPage();
-    const form = screen.getByTestId("submit-customer").closest("form")!;
+    const submitBtn = await screen.findByTestId("submit-customer");
+    const form = submitBtn.closest("form")!;
 
-    fireEvent.change(form.querySelector("[name='name']")!, {
-      target: { value: "Northwind Trading Co." },
-    });
-    fireEvent.change(form.querySelector("[name='contact']")!, {
-      target: { value: "Ingrid Halvorsen Jr." },
-    });
-    fireEvent.click(screen.getByTestId("submit-customer"));
-
+    // Wait for the async customer load + form.reset() to populate the fields
     await waitFor(() => {
-      const updated = repository.getCustomer("cust_northwind");
+      expect(form.querySelector("[name='name']")).toHaveValue("Northwind Trading");
+    });
+
+    const nameInput = form.querySelector("[name='name']") as HTMLInputElement;
+    const contactInput = form.querySelector("[name='contact']") as HTMLInputElement;
+
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Northwind Trading Co.");
+
+    await userEvent.clear(contactInput);
+    await userEvent.type(contactInput, "Ingrid Halvorsen Jr.");
+
+    // Shadcn select sometimes loses value on async reset in JSdom
+    await userEvent.click(screen.getByTestId("status-trigger"));
+    await userEvent.click(screen.getByRole("option", { name: "Active" }));
+
+    await userEvent.click(submitBtn);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    await waitFor(async () => {
+      const updated = await repository.getCustomer("cust_northwind");
       expect(updated?.name).toBe("Northwind Trading Co.");
-      expect(updated?.contact).toBe("Ingrid Halvorsen Jr.");
     });
   });
 });

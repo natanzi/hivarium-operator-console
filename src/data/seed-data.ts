@@ -56,7 +56,8 @@ export const CUSTOMER_STATUS_LABELS: Record<CustomerStatus, string> = {
   evaluation: "Evaluation",
   active: "Active",
   paused: "Paused",
-  churned: "Archived",
+  churned: "Churned",
+  archived: "Archived",
 };
 
 export const STATUS_BADGE_CLASS: Record<CustomerStatus, string> = {
@@ -64,6 +65,7 @@ export const STATUS_BADGE_CLASS: Record<CustomerStatus, string> = {
   active: "border-sage/40 text-sage bg-sage-soft",
   paused: "border-border text-muted-foreground bg-muted",
   churned: "border-destructive/30 text-destructive bg-destructive/10",
+  archived: "border-border text-muted-foreground bg-muted",
 };
 
 /**

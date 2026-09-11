@@ -4,7 +4,7 @@ import {
   createInMemoryRepository,
   type StorageLike,
 } from "@/data/local-storage-repository";
-import { AGENT_PRODUCTS, SEED_NOW } from "@/data/seed-data";
+import { AGENT_PRODUCTS, SEED_NOW, buildSeedStore } from "@/data/seed-data";
 import { usageDebitTransactionId } from "@/domain/ledger-rules";
 import type { DataStore, DataStoreV1 } from "@/domain/types";
 
@@ -21,16 +21,16 @@ function readPersistedStore(storage: StorageLike): DataStore {
 }
 
 describe("LocalStorageRepository commercial and access lifecycle", () => {
-  it("derives legacy subscriptions from monthly arrangements", () => {
+  it("derives legacy subscriptions from monthly arrangements", async () => {
     const { repository } = createInMemoryRepository();
-    const subscriptions = repository.getSubscriptions("cust_northwind");
+    const subscriptions = await repository.getSubscriptions("cust_northwind");
     expect(subscriptions).toHaveLength(2);
     expect(subscriptions.every((s) => s.plan === "growth")).toBe(true);
   });
 
-  it("projects the commercial snapshot with active, scheduled, and history", () => {
+  it("projects the commercial snapshot with active, scheduled, and history", async () => {
     const { repository } = createInMemoryRepository();
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_greyharbor",
       SEED_NOW
     );
@@ -41,9 +41,9 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
     expect([...dates].sort((a, b) => b - a)).toEqual(dates);
   });
 
-  it("saves a monthly commercial arrangement for a customer without an active one", () => {
+  it("saves a monthly commercial arrangement for a customer without an active one", async () => {
     const { repository } = createInMemoryRepository();
-    const arrangement = repository.saveCommercialArrangement(
+    const arrangement = await repository.saveCommercialArrangement(
       {
         id: "arr_test_monthly",
         customerId: "cust_greyharbor",
@@ -61,22 +61,22 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
       SEED_NOW
     );
     expect(arrangement.model).toBe("monthly");
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_greyharbor",
       SEED_NOW
     );
     expect(snapshot.active?.id).toBe("arr_test_monthly");
     // A linked activity event is recorded.
     expect(
-      repository
-        .listActivityEvents("cust_greyharbor")
-        .some((e) => e.subjectId === "arr_test_monthly")
+      (await repository.listActivityEvents("cust_greyharbor")).some(
+        (e) => e.subjectId === "arr_test_monthly"
+      )
     ).toBe(true);
   });
 
-  it("immediately replaces the active arrangement and closes the previous one", () => {
+  it("immediately replaces the active arrangement and closes the previous one", async () => {
     const { repository } = createInMemoryRepository();
-    const arrangement = repository.saveCommercialArrangement(
+    const arrangement = await repository.saveCommercialArrangement(
       {
         id: "arr_sablefin_replacement",
         customerId: "cust_sablefin",
@@ -94,24 +94,24 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
       SEED_NOW
     );
     expect(arrangement.status).toBe("active");
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_sablefin",
       SEED_NOW
     );
     expect(snapshot.active?.id).toBe("arr_sablefin_replacement");
     // The superseded arrangement is closed at the boundary and points at the
     // successor instead of being deleted.
-    const closed = repository
-      .listCommercialArrangements("cust_sablefin")
-      .find((a) => a.id === "arr_sub_sablefin_sentinel_trial");
+    const closed = (
+      await repository.listCommercialArrangements("cust_sablefin")
+    ).find((a) => a.id === "arr_sub_sablefin_sentinel_trial");
     expect(closed?.status).toBe("ended");
     expect(closed?.effectiveTo).toBe(SEED_NOW);
     expect(closed?.replacedByArrangementId).toBe("arr_sablefin_replacement");
   });
 
-  it("schedules a replacement without disturbing the current arrangement", () => {
+  it("schedules a replacement without disturbing the current arrangement", async () => {
     const { repository } = createInMemoryRepository();
-    const arrangement = repository.saveCommercialArrangement(
+    const arrangement = await repository.saveCommercialArrangement(
       {
         id: "arr_sablefin_scheduled",
         customerId: "cust_sablefin",
@@ -129,22 +129,22 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
       SEED_NOW
     );
     expect(arrangement.status).toBe("scheduled");
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_sablefin",
       SEED_NOW
     );
     expect(snapshot.active?.id).toBe("arr_sub_sablefin_sentinel_trial");
     expect(snapshot.scheduled?.id).toBe("arr_sablefin_scheduled");
-    const current = repository
-      .listCommercialArrangements("cust_sablefin")
-      .find((a) => a.id === "arr_sub_sablefin_sentinel_trial");
+    const current = (
+      await repository.listCommercialArrangements("cust_sablefin")
+    ).find((a) => a.id === "arr_sub_sablefin_sentinel_trial");
     expect(current?.status).toBe("active");
     expect(current?.replacedByArrangementId).toBeNull();
   });
 
-  it("rejects saving an arrangement for an unknown customer", () => {
+  it("rejects saving an arrangement for an unknown customer", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.saveCommercialArrangement(
         {
           id: "arr_unknown",
@@ -162,12 +162,12 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/does not exist/);
+    ).rejects.toThrow(/does not exist/);
   });
 
-  it("rejects saving an invalid arrangement without writing", () => {
+  it("rejects saving an invalid arrangement without writing", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.saveCommercialArrangement(
         {
           id: "arr_invalid",
@@ -185,15 +185,15 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/monthlyAmountCents/);
+    ).rejects.toThrow(/monthlyAmountCents/);
     expect(
-      repository.listCommercialArrangements("cust_greyharbor")
+      await repository.listCommercialArrangements("cust_greyharbor")
     ).toHaveLength(3);
   });
 
-  it("projects the agent access snapshot with current, scheduled, and history", () => {
+  it("projects the agent access snapshot with current, scheduled, and history", async () => {
     const { repository } = createInMemoryRepository();
-    const snapshot = repository.getAgentAccessSnapshot(
+    const snapshot = await repository.getAgentAccessSnapshot(
       "cust_greyharbor",
       SEED_NOW
     );
@@ -202,9 +202,9 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
     expect(snapshot.history[0].revokedAt).not.toBeNull();
   });
 
-  it("grants agent access and prevents duplicate active grants", () => {
+  it("grants agent access and prevents duplicate active grants", async () => {
     const { repository } = createInMemoryRepository();
-    const grant = repository.grantAgentAccess(
+    const grant = await repository.grantAgentAccess(
       {
         customerId: "cust_greyharbor",
         agentProductId: "agent_sentinel",
@@ -217,12 +217,12 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
     );
     expect(grant.agentProductId).toBe("agent_sentinel");
     expect(
-      repository
-        .getAgentAccessSnapshot("cust_greyharbor", SEED_NOW)
-        .current.some((g) => g.agentProductId === "agent_sentinel")
+      (
+        await repository.getAgentAccessSnapshot("cust_greyharbor", SEED_NOW)
+      ).current.some((g) => g.agentProductId === "agent_sentinel")
     ).toBe(true);
 
-    expect(() =>
+    await expect(
       repository.grantAgentAccess(
         {
           customerId: "cust_greyharbor",
@@ -234,33 +234,39 @@ describe("LocalStorageRepository commercial and access lifecycle", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/already has active or scheduled access/);
+    ).rejects.toThrow(/already has active or scheduled access/);
   });
 
-  it("lists activity events newest first", () => {
+  it("lists activity events newest first", async () => {
     const { repository } = createInMemoryRepository();
-    const events = repository.listActivityEvents("cust_northwind");
+    const events = await repository.listActivityEvents("cust_northwind");
     expect(events.length).toBeGreaterThan(0);
     const dates = events.map((e) => Date.parse(e.occurredAt));
     expect([...dates].sort((a, b) => b - a)).toEqual(dates);
   });
 
-  it("cascades customer deletion across commercial, access, and activity records", () => {
+  it("archives a customer and retains dependent records", async () => {
     const { repository } = createInMemoryRepository();
-    repository.deleteCustomer("cust_northwind");
-    expect(repository.getCustomer("cust_northwind")).toBeUndefined();
+    await repository.archiveCustomer("cust_northwind");
+    expect((await repository.getCustomer("cust_northwind"))?.status).toBe(
+      "archived"
+    );
     expect(
-      repository.listCommercialArrangements("cust_northwind")
-    ).toHaveLength(0);
-    expect(repository.listAgentAccessGrants("cust_northwind")).toHaveLength(0);
-    expect(repository.listActivityEvents("cust_northwind")).toHaveLength(0);
+      await repository.listCommercialArrangements("cust_northwind")
+    ).toHaveLength(2);
+    expect(await repository.listAgentAccessGrants("cust_northwind")).toHaveLength(
+      2
+    );
+    expect(await repository.listActivityEvents("cust_northwind")).toHaveLength(
+      4
+    );
   });
 });
 
 describe("terminateCommercialArrangement", () => {
-  it("terminates an arrangement and revokes active grants with a shared causationId", () => {
+  it("terminates an arrangement and revokes active grants with a shared causationId", async () => {
     const { repository } = createInMemoryRepository();
-    const terminated = repository.terminateCommercialArrangement(
+    const terminated = await repository.terminateCommercialArrangement(
       {
         arrangementId: "arr_sub_northwind_courier_growth",
         customerId: "cust_northwind",
@@ -272,13 +278,13 @@ describe("terminateCommercialArrangement", () => {
     expect(terminated.effectiveTo).toBe(SEED_NOW);
 
     // Every active grant for the customer is revoked in the same write.
-    const grants = repository.listAgentAccessGrants("cust_northwind");
+    const grants = await repository.listAgentAccessGrants("cust_northwind");
     expect(grants).toHaveLength(2);
     expect(grants.every((g) => g.revokedAt === SEED_NOW)).toBe(true);
 
     // One triggering event plus one system-sourced access event per grant,
     // all sharing the trigger event id as causationId.
-    const events = repository.listActivityEvents("cust_northwind");
+    const events = await repository.listActivityEvents("cust_northwind");
     const trigger = events.find(
       (e) => e.id === "evt_arr_sub_northwind_courier_growth_terminated"
     );
@@ -295,9 +301,9 @@ describe("terminateCommercialArrangement", () => {
     ).toBe(true);
   });
 
-  it("rejects terminating a missing arrangement", () => {
+  it("rejects terminating a missing arrangement", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.terminateCommercialArrangement(
         {
           arrangementId: "arr_missing",
@@ -306,12 +312,12 @@ describe("terminateCommercialArrangement", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/does not exist/);
+    ).rejects.toThrow(/does not exist/);
   });
 
-  it("rejects terminating with an empty reason", () => {
+  it("rejects terminating with an empty reason", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.terminateCommercialArrangement(
         {
           arrangementId: "arr_sub_northwind_courier_growth",
@@ -320,12 +326,12 @@ describe("terminateCommercialArrangement", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/reason is required/);
+    ).rejects.toThrow(/reason is required/);
   });
 
-  it("rejects terminating an already terminated arrangement", () => {
+  it("rejects terminating an already terminated arrangement", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.terminateCommercialArrangement(
         {
           arrangementId: "arr_greyharbor_monthly_terminated",
@@ -334,25 +340,25 @@ describe("terminateCommercialArrangement", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/already terminated/);
+    ).rejects.toThrow(/already terminated/);
   });
 });
 
 describe("reconcileCommercialLifecycle", () => {
-  it("activates a due scheduled arrangement and closes the superseded one", () => {
+  it("activates a due scheduled arrangement and closes the superseded one", async () => {
     const { repository } = createInMemoryRepository();
-    repository.reconcileCommercialLifecycle(
+    await repository.reconcileCommercialLifecycle(
       "cust_meridians",
       "2026-12-01T00:00:00.000Z"
     );
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_meridians",
       "2026-12-01T00:00:00.000Z"
     );
     expect(snapshot.active?.id).toBe("arr_meridians_monthly_scheduled");
-    const closed = repository
-      .listCommercialArrangements("cust_meridians")
-      .find((a) => a.id === "arr_meridians_prepaid");
+    const closed = (
+      await repository.listCommercialArrangements("cust_meridians")
+    ).find((a) => a.id === "arr_meridians_prepaid");
     expect(closed?.status).toBe("ended");
     expect(closed?.effectiveTo).toBe("2026-12-01T00:00:00.000Z");
     expect(closed?.replacedByArrangementId).toBe(
@@ -360,29 +366,29 @@ describe("reconcileCommercialLifecycle", () => {
     );
   });
 
-  it("is idempotent for a repeated asOf", () => {
+  it("is idempotent for a repeated asOf", async () => {
     const { repository } = createInMemoryRepository();
-    repository.reconcileCommercialLifecycle(
+    await repository.reconcileCommercialLifecycle(
       "cust_meridians",
       "2026-12-01T00:00:00.000Z"
     );
-    const eventsAfterFirst = repository.listActivityEvents(
-      "cust_meridians"
+    const eventsAfterFirst = (
+      await repository.listActivityEvents("cust_meridians")
     ).length;
-    repository.reconcileCommercialLifecycle(
+    await repository.reconcileCommercialLifecycle(
       "cust_meridians",
       "2026-12-01T00:00:00.000Z"
     );
-    expect(repository.listActivityEvents("cust_meridians")).toHaveLength(
+    expect(await repository.listActivityEvents("cust_meridians")).toHaveLength(
       eventsAfterFirst
     );
   });
 
-  it("revokes active grants with a shared causationId when no arrangement is active", () => {
+  it("revokes active grants with a shared causationId when no arrangement is active", async () => {
     const { repository } = createInMemoryRepository();
     // Remove the only active arrangement, then grant fresh access so a
     // still-active grant exists without any commercial coverage.
-    repository.terminateCommercialArrangement(
+    await repository.terminateCommercialArrangement(
       {
         arrangementId: "arr_sub_sablefin_sentinel_trial",
         customerId: "cust_sablefin",
@@ -390,7 +396,7 @@ describe("reconcileCommercialLifecycle", () => {
       },
       SEED_NOW
     );
-    repository.grantAgentAccess(
+    await repository.grantAgentAccess(
       {
         customerId: "cust_sablefin",
         agentProductId: "agent_sentinel",
@@ -401,15 +407,15 @@ describe("reconcileCommercialLifecycle", () => {
       },
       SEED_NOW
     );
-    repository.reconcileCommercialLifecycle("cust_sablefin", SEED_NOW);
+    await repository.reconcileCommercialLifecycle("cust_sablefin", SEED_NOW);
 
-    const grants = repository.listAgentAccessGrants("cust_sablefin");
+    const grants = await repository.listAgentAccessGrants("cust_sablefin");
     expect(
       grants.some((g) => g.revokedAt === SEED_NOW && g.endsAt === null)
     ).toBe(true);
-    const revocations = repository
-      .listActivityEvents("cust_sablefin")
-      .filter((e) => e.type === "access.revoked");
+    const revocations = (
+      await repository.listActivityEvents("cust_sablefin")
+    ).filter((e) => e.type === "access.revoked");
     expect(revocations).toHaveLength(1);
     expect(revocations[0].source).toBe("system");
     expect(revocations[0].causationId).toBe(
@@ -417,20 +423,22 @@ describe("reconcileCommercialLifecycle", () => {
     );
   });
 
-  it("is a no-op for a customer with no due transitions and no active grants to revoke", () => {
+  it("is a no-op for a customer with no due transitions and no active grants to revoke", async () => {
     const { repository } = createInMemoryRepository();
-    const eventsBefore = repository.listActivityEvents("cust_northwind").length;
-    repository.reconcileCommercialLifecycle("cust_northwind", SEED_NOW);
-    expect(repository.listActivityEvents("cust_northwind")).toHaveLength(
+    const eventsBefore = (
+      await repository.listActivityEvents("cust_northwind")
+    ).length;
+    await repository.reconcileCommercialLifecycle("cust_northwind", SEED_NOW);
+    expect(await repository.listActivityEvents("cust_northwind")).toHaveLength(
       eventsBefore
     );
   });
 });
 
 describe("revokeAgentAccess", () => {
-  it("revokes agent access immediately", () => {
+  it("revokes agent access immediately", async () => {
     const { repository } = createInMemoryRepository();
-    const grant = repository.revokeAgentAccess(
+    const grant = await repository.revokeAgentAccess(
       {
         grantId: "grant_lic_northwind_courier",
         customerId: "cust_northwind",
@@ -440,7 +448,7 @@ describe("revokeAgentAccess", () => {
     );
     expect(grant.revokedAt).toBe(SEED_NOW);
     expect(grant.scheduledRevokeAt).toBeNull();
-    const snapshot = repository.getAgentAccessSnapshot(
+    const snapshot = await repository.getAgentAccessSnapshot(
       "cust_northwind",
       SEED_NOW
     );
@@ -452,9 +460,9 @@ describe("revokeAgentAccess", () => {
     ).toBe(true);
   });
 
-  it("schedules a future agent access revocation", () => {
+  it("schedules a future agent access revocation", async () => {
     const { repository } = createInMemoryRepository();
-    const grant = repository.revokeAgentAccess(
+    const grant = await repository.revokeAgentAccess(
       {
         grantId: "grant_lic_northwind_courier",
         customerId: "cust_northwind",
@@ -466,7 +474,7 @@ describe("revokeAgentAccess", () => {
     expect(grant.revokedAt).toBeNull();
     expect(grant.scheduledRevokeAt).toBe("2026-12-01T00:00:00.000Z");
     // The grant keeps working until the scheduled date.
-    const snapshot = repository.getAgentAccessSnapshot(
+    const snapshot = await repository.getAgentAccessSnapshot(
       "cust_northwind",
       SEED_NOW
     );
@@ -475,9 +483,9 @@ describe("revokeAgentAccess", () => {
     ).toBe(true);
   });
 
-  it("rejects revoking a missing grant", () => {
+  it("rejects revoking a missing grant", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.revokeAgentAccess(
         {
           grantId: "grant_missing",
@@ -486,12 +494,12 @@ describe("revokeAgentAccess", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/does not exist/);
+    ).rejects.toThrow(/does not exist/);
   });
 
-  it("rejects revoking an already revoked grant", () => {
+  it("rejects revoking an already revoked grant", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.revokeAgentAccess(
         {
           grantId: "grant_greyharbor_sentinel",
@@ -500,12 +508,12 @@ describe("revokeAgentAccess", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/already revoked/);
+    ).rejects.toThrow(/already revoked/);
   });
 });
 
 describe("migrateStore", () => {
-  it("upgrades a legacy v1 payload to the canonical v2 shape", () => {
+  it("upgrades a legacy v1 payload to the canonical v2 shape", async () => {
     const { repository, storage } = createInMemoryRepository(false);
     const v1: DataStoreV1 = {
       customers: [
@@ -548,11 +556,64 @@ describe("migrateStore", () => {
     };
     storage.setItem(STORAGE_KEY, JSON.stringify(v1));
 
-    expect(repository.getCustomer("cust_legacy")).toBeDefined();
-    expect(repository.listCommercialArrangements("cust_legacy")).toHaveLength(1);
-    expect(repository.listAgentAccessGrants("cust_legacy")).toHaveLength(1);
-    expect(repository.listActivityEvents("cust_legacy").length).toBeGreaterThan(
-      0
+    expect(await repository.getCustomer("cust_legacy")).toBeDefined();
+    expect(
+      await repository.listCommercialArrangements("cust_legacy")
+    ).toHaveLength(1);
+    expect(await repository.listAgentAccessGrants("cust_legacy")).toHaveLength(
+      1
+    );
+    expect(
+      (await repository.listActivityEvents("cust_legacy")).length
+    ).toBeGreaterThan(0);
+  });
+
+  it("upgrades a canonical v3 payload to v4 without dropping ledger or usage rows", async () => {
+    const { repository, storage } = createInMemoryRepository(false);
+    const v3 = {
+      ...buildSeedStore(),
+      schemaVersion: 3 as const,
+      customers: buildSeedStore().customers.map((customer) =>
+        customer.id === "cust_sablefin"
+          ? { ...customer, status: "archived" }
+          : customer
+      ),
+    };
+    storage.setItem(STORAGE_KEY, JSON.stringify(v3));
+
+    // Trigger the migration read; the repository re-persists the upgraded
+    // payload only when the migration actually changed it.
+    expect((await repository.getCustomer("cust_sablefin"))?.status).toBe(
+      "archived"
+    );
+
+    const persisted = readPersistedStore(storage);
+    expect(persisted.schemaVersion).toBe(4);
+    // Every generalized collection survives the v3→v4 migration untouched.
+    expect(persisted.customers).toHaveLength(v3.customers.length);
+    expect(persisted.commercialArrangements).toHaveLength(
+      v3.commercialArrangements.length
+    );
+    expect(persisted.agentAccessGrants).toHaveLength(
+      v3.agentAccessGrants.length
+    );
+    expect(persisted.activityEvents).toHaveLength(v3.activityEvents.length);
+    expect(persisted.ledgerTransactions).toHaveLength(
+      v3.ledgerTransactions.length
+    );
+    expect(persisted.usageRecords).toHaveLength(v3.usageRecords.length);
+    // The archived lifecycle status passes through unchanged.
+    expect(
+      persisted.customers.find((c) => c.id === "cust_sablefin")?.status
+    ).toBe("archived");
+    // The migrated store is readable through the repository.
+    expect((await repository.getCustomer("cust_sablefin"))?.status).toBe(
+      "archived"
+    );
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(
+      buildSeedStore().ledgerTransactions
+        .filter((t) => t.customerId === "cust_meridians")
+        .reduce((sum, t) => sum + t.amountTokens, 0)
     );
   });
 });
@@ -565,9 +626,9 @@ describe("recordUsageDebit", () => {
     sourceReference: "usage_meridians_001",
   };
 
-  it("commits the usage record and linked usage_debit atomically", () => {
+  it("commits the usage record and linked usage_debit atomically", async () => {
     const { repository, storage } = createInMemoryRepository();
-    const result = repository.recordUsageDebit(usageInput, SEED_NOW);
+    const result = await repository.recordUsageDebit(usageInput, SEED_NOW);
     expect(result.usage).toMatchObject({
       customerId: "cust_meridians",
       agentProductId: "agent_sentinel",
@@ -586,43 +647,45 @@ describe("recordUsageDebit", () => {
     const persisted = readPersistedStore(storage);
     expect(persisted.usageRecords).toHaveLength(4);
     expect(persisted.ledgerTransactions).toHaveLength(7);
-    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(248800);
   });
 
-  it("returns the existing pair without writing on an exact replay", () => {
+  it("returns the existing pair without writing on an exact replay", async () => {
     const { repository, storage } = createInMemoryRepository();
-    const first = repository.recordUsageDebit(usageInput, SEED_NOW);
+    const first = await repository.recordUsageDebit(usageInput, SEED_NOW);
     const before = storage.getItem(STORAGE_KEY);
-    const replay = repository.recordUsageDebit(usageInput, SEED_NOW);
+    const replay = await repository.recordUsageDebit(usageInput, SEED_NOW);
     expect(replay.usage.id).toBe(first.usage.id);
     expect(replay.transaction.id).toBe(first.transaction.id);
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
-    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(248800);
   });
 
-  it("rejects a conflicting reuse of the source reference without writing", () => {
+  it("rejects a conflicting reuse of the source reference without writing", async () => {
     const { repository, storage } = createInMemoryRepository();
-    repository.recordUsageDebit(usageInput, SEED_NOW);
+    await repository.recordUsageDebit(usageInput, SEED_NOW);
     const before = storage.getItem(STORAGE_KEY);
-    expect(() =>
+    await expect(
       repository.recordUsageDebit(
         { ...usageInput, tokenQuantity: 999 },
         SEED_NOW
       )
-    ).toThrow(/Source reference "usage_meridians_001" is already assigned to different usage/);
+    ).rejects.toThrow(
+      /Source reference "usage_meridians_001" is already assigned to different usage/
+    );
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
-    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(248800);
   });
 
-  it("rejects a debit that would make the balance negative before any write", () => {
+  it("rejects a debit that would make the balance negative before any write", async () => {
     const { repository, storage } = createInMemoryRepository();
     const before = storage.getItem(STORAGE_KEY);
-    expect(() =>
+    await expect(
       repository.recordUsageDebit(
         { ...usageInput, tokenQuantity: 300000 },
         SEED_NOW
       )
-    ).toThrow(/Insufficient token balance/);
+    ).rejects.toThrow(/Insufficient token balance/);
     // The rejected debit is never written: only the three seeded usage records
     // and six seeded ledger transactions remain.
     const persisted = readPersistedStore(storage);
@@ -631,34 +694,34 @@ describe("recordUsageDebit", () => {
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
   });
 
-  it("rejects an unknown customer", () => {
+  it("rejects an unknown customer", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.recordUsageDebit(
         { ...usageInput, customerId: "cust_missing" },
         SEED_NOW
       )
-    ).toThrow(/does not exist/);
+    ).rejects.toThrow(/does not exist/);
   });
 
-  it("rejects a customer without an active prepaid arrangement", () => {
+  it("rejects a customer without an active prepaid arrangement", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.recordUsageDebit(
         { ...usageInput, customerId: "cust_northwind" },
         SEED_NOW
       )
-    ).toThrow(/does not have an active prepaid arrangement/);
+    ).rejects.toThrow(/does not have an active prepaid arrangement/);
   });
 
-  it("rejects an unknown agent product", () => {
+  it("rejects an unknown agent product", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.recordUsageDebit(
         { ...usageInput, agentProductId: "agent_missing" },
         SEED_NOW
       )
-    ).toThrow(/does not exist/);
+    ).rejects.toThrow(/does not exist/);
   });
 });
 
@@ -670,65 +733,65 @@ describe("addManualAdjustment", () => {
     reason: "Correction for over-credited balance.",
   };
 
-  it("appends a positive adjustment", () => {
+  it("appends a positive adjustment", async () => {
     const { repository } = createInMemoryRepository();
-    const transaction = repository.addManualAdjustment(
+    const transaction = await repository.addManualAdjustment(
       { ...adjustmentInput, amountTokens: 500 },
       SEED_NOW
     );
     expect(transaction.kind).toBe("manual_adjustment");
     expect(transaction.amountTokens).toBe(500);
-    expect(repository.getTokenBalance("cust_meridians")).toBe(250500);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(250500);
   });
 
-  it("appends a negative adjustment", () => {
+  it("appends a negative adjustment", async () => {
     const { repository } = createInMemoryRepository();
-    const transaction = repository.addManualAdjustment(
+    const transaction = await repository.addManualAdjustment(
       adjustmentInput,
       SEED_NOW
     );
     expect(transaction.amountTokens).toBe(-500);
-    expect(repository.getTokenBalance("cust_meridians")).toBe(249500);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(249500);
   });
 
-  it("rejects a zero amount without writing", () => {
+  it("rejects a zero amount without writing", async () => {
     const { repository, storage } = createInMemoryRepository();
     const before = storage.getItem(STORAGE_KEY);
-    expect(() =>
+    await expect(
       repository.addManualAdjustment(
         { ...adjustmentInput, amountTokens: 0 },
         SEED_NOW
       )
-    ).toThrow(/must be non-zero/);
+    ).rejects.toThrow(/must be non-zero/);
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
   });
 
-  it("rejects an adjustment that would make the balance negative", () => {
+  it("rejects an adjustment that would make the balance negative", async () => {
     const { repository, storage } = createInMemoryRepository();
     const before = storage.getItem(STORAGE_KEY);
-    expect(() =>
+    await expect(
       repository.addManualAdjustment(
         { ...adjustmentInput, amountTokens: -300000 },
         SEED_NOW
       )
-    ).toThrow(/Insufficient token balance/);
+    ).rejects.toThrow(/Insufficient token balance/);
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
   });
 
-  it("rejects a missing reason or reference", () => {
+  it("rejects a missing reason or reference", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.addManualAdjustment(
         { ...adjustmentInput, reason: "   " },
         SEED_NOW
       )
-    ).toThrow(/reason is required/);
-    expect(() =>
+    ).rejects.toThrow(/reason is required/);
+    await expect(
       repository.addManualAdjustment(
         { ...adjustmentInput, reference: "" },
         SEED_NOW
       )
-    ).toThrow(/reference is required/);
+    ).rejects.toThrow(/reference is required/);
   });
 });
 
@@ -741,29 +804,32 @@ describe("reverseTransaction", () => {
     reason: "Reversing the opening credit.",
   };
 
-  it("appends one reversal negating the full target amount", () => {
+  it("appends one reversal negating the full target amount", async () => {
     const { repository } = createInMemoryRepository();
-    const transaction = repository.reverseTransaction(reversalInput, SEED_NOW);
+    const transaction = await repository.reverseTransaction(
+      reversalInput,
+      SEED_NOW
+    );
     expect(transaction.kind).toBe("reversal");
     expect(transaction.amountTokens).toBe(-250000);
     if (transaction.kind === "reversal") {
       expect(transaction.reversesTransactionId).toBe(openingCreditId);
     }
-    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(0);
   });
 
-  it("rejects a second reversal of the same target", () => {
+  it("rejects a second reversal of the same target", async () => {
     const { repository } = createInMemoryRepository();
-    repository.reverseTransaction(reversalInput, SEED_NOW);
-    expect(() =>
+    await repository.reverseTransaction(reversalInput, SEED_NOW);
+    await expect(
       repository.reverseTransaction(reversalInput, SEED_NOW)
-    ).toThrow(/has already been reversed/);
+    ).rejects.toThrow(/has already been reversed/);
   });
 
-  it("rejects a reversal-of-reversal", () => {
+  it("rejects a reversal-of-reversal", async () => {
     const { repository } = createInMemoryRepository();
-    const reversal = repository.reverseTransaction(reversalInput, SEED_NOW);
-    expect(() =>
+    const reversal = await repository.reverseTransaction(reversalInput, SEED_NOW);
+    await expect(
       repository.reverseTransaction(
         {
           customerId: "cust_meridians",
@@ -773,12 +839,12 @@ describe("reverseTransaction", () => {
         },
         SEED_NOW
       )
-    ).toThrow(/is a reversal and cannot be reversed/);
+    ).rejects.toThrow(/is a reversal and cannot be reversed/);
   });
 
-  it("rejects a reversal that would make the balance negative", () => {
+  it("rejects a reversal that would make the balance negative", async () => {
     const { repository } = createInMemoryRepository();
-    repository.recordUsageDebit(
+    await repository.recordUsageDebit(
       {
         customerId: "cust_meridians",
         agentProductId: "agent_sentinel",
@@ -787,26 +853,26 @@ describe("reverseTransaction", () => {
       },
       SEED_NOW
     );
-    expect(() =>
+    await expect(
       repository.reverseTransaction(reversalInput, SEED_NOW)
-    ).toThrow(/Insufficient token balance/);
+    ).rejects.toThrow(/Insufficient token balance/);
   });
 
-  it("rejects a missing target", () => {
+  it("rejects a missing target", async () => {
     const { repository } = createInMemoryRepository();
-    expect(() =>
+    await expect(
       repository.reverseTransaction(
         { ...reversalInput, transactionId: "txn_missing" },
         SEED_NOW
       )
-    ).toThrow(/does not exist/);
+    ).rejects.toThrow(/does not exist/);
   });
 });
 
-describe("deleteCustomer ledger cascade", () => {
-  it("removes ledger and usage records in the same write", () => {
+describe("archiveCustomer ledger retention", () => {
+  it("archives the customer and retains ledger and usage records", async () => {
     const { repository, storage } = createInMemoryRepository();
-    repository.recordUsageDebit(
+    await repository.recordUsageDebit(
       {
         customerId: "cust_meridians",
         agentProductId: "agent_sentinel",
@@ -815,24 +881,27 @@ describe("deleteCustomer ledger cascade", () => {
       },
       SEED_NOW
     );
-    repository.deleteCustomer("cust_meridians");
+    await repository.archiveCustomer("cust_meridians");
     const persisted = readPersistedStore(storage);
     expect(
       persisted.ledgerTransactions.some(
         (t) => t.customerId === "cust_meridians"
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       persisted.usageRecords.some((u) => u.customerId === "cust_meridians")
-    ).toBe(false);
-    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+    ).toBe(true);
+    expect((await repository.getCustomer("cust_meridians"))?.status).toBe(
+      "archived"
+    );
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(248800);
   });
 });
 
 describe("getAccountStatement", () => {
-  it("returns newest-first rows with full-account running balances", () => {
+  it("returns newest-first rows with full-account running balances", async () => {
     const { repository } = createInMemoryRepository();
-    const rows = repository.getAccountStatement("cust_meridians");
+    const rows = await repository.getAccountStatement("cust_meridians");
 
     expect(rows).toHaveLength(6);
     const dates = rows.map((row) => Date.parse(row.transaction.occurredAt));
@@ -850,9 +919,9 @@ describe("getAccountStatement", () => {
     ]);
   });
 
-  it("exposes type, signed amount, reference, and reversal detail per row", () => {
+  it("exposes type, signed amount, reference, and reversal detail per row", async () => {
     const { repository } = createInMemoryRepository();
-    const rows = repository.getAccountStatement("cust_meridians");
+    const rows = await repository.getAccountStatement("cust_meridians");
 
     const reversalRow = rows.find((row) => row.transaction.kind === "reversal");
     expect(reversalRow?.transaction.amountTokens).toBe(1500);
@@ -879,24 +948,24 @@ describe("getAccountStatement", () => {
     );
   });
 
-  it("returns an empty statement for a customer without ledger history", () => {
+  it("returns an empty statement for a customer without ledger history", async () => {
     const { repository } = createInMemoryRepository();
-    expect(repository.getAccountStatement("cust_northwind")).toEqual([]);
-    expect(repository.getAccountStatement("cust_missing")).toEqual([]);
+    expect(await repository.getAccountStatement("cust_northwind")).toEqual([]);
+    expect(await repository.getAccountStatement("cust_missing")).toEqual([]);
   });
 
-  it("is read-only and never persists a write", () => {
+  it("is read-only and never persists a write", async () => {
     const { repository, storage } = createInMemoryRepository();
     const before = storage.getItem(STORAGE_KEY);
-    repository.getAccountStatement("cust_meridians");
+    await repository.getAccountStatement("cust_meridians");
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
   });
 });
 
 describe("getUsageSummary", () => {
-  it("returns the full statement, net consumption, and per-agent breakdown", () => {
+  it("returns the full statement, net consumption, and per-agent breakdown", async () => {
     const { repository } = createInMemoryRepository();
-    const summary = repository.getUsageSummary("cust_meridians", {});
+    const summary = await repository.getUsageSummary("cust_meridians", {});
 
     expect(summary.customerId).toBe("cust_meridians");
     expect(summary.rows).toHaveLength(6);
@@ -917,9 +986,9 @@ describe("getUsageSummary", () => {
     ]);
   });
 
-  it("applies an inclusive date range and nets a reversed debit to zero", () => {
+  it("applies an inclusive date range and nets a reversed debit to zero", async () => {
     const { repository } = createInMemoryRepository();
-    const summary = repository.getUsageSummary("cust_meridians", {
+    const summary = await repository.getUsageSummary("cust_meridians", {
       from: "2026-06-01",
       to: "2026-06-30",
     });
@@ -946,9 +1015,9 @@ describe("getUsageSummary", () => {
     ]);
   });
 
-  it("keeps rows on both inclusive date boundaries", () => {
+  it("keeps rows on both inclusive date boundaries", async () => {
     const { repository } = createInMemoryRepository();
-    const summary = repository.getUsageSummary("cust_meridians", {
+    const summary = await repository.getUsageSummary("cust_meridians", {
       from: "2026-06-20",
       to: "2026-06-21",
     });
@@ -959,9 +1028,9 @@ describe("getUsageSummary", () => {
     expect(summary.netTokensConsumed).toBe(0);
   });
 
-  it("narrows the statement and summary by agent product", () => {
+  it("narrows the statement and summary by agent product", async () => {
     const { repository } = createInMemoryRepository();
-    const summary = repository.getUsageSummary(
+    const summary = await repository.getUsageSummary(
       "cust_meridians",
       {},
       "agent_sentinel"
@@ -983,9 +1052,9 @@ describe("getUsageSummary", () => {
     ]);
   });
 
-  it("narrows the statement and summary by transaction type", () => {
+  it("narrows the statement and summary by transaction type", async () => {
     const { repository } = createInMemoryRepository();
-    const summary = repository.getUsageSummary(
+    const summary = await repository.getUsageSummary(
       "cust_meridians",
       {},
       undefined,
@@ -1000,9 +1069,9 @@ describe("getUsageSummary", () => {
     expect(summary.perAgent).toEqual([]);
   });
 
-  it("combines date, agent, and transaction-type filters", () => {
+  it("combines date, agent, and transaction-type filters", async () => {
     const { repository } = createInMemoryRepository();
-    const summary = repository.getUsageSummary(
+    const summary = await repository.getUsageSummary(
       "cust_meridians",
       { from: "2026-05-01", to: "2026-06-30" },
       "agent_sentinel",
@@ -1024,9 +1093,9 @@ describe("getUsageSummary", () => {
     ]);
   });
 
-  it("keeps full-account resulting balances when rows are filtered", () => {
+  it("keeps full-account resulting balances when rows are filtered", async () => {
     const { repository } = createInMemoryRepository();
-    const summary = repository.getUsageSummary(
+    const summary = await repository.getUsageSummary(
       "cust_meridians",
       {},
       undefined,
@@ -1038,21 +1107,21 @@ describe("getUsageSummary", () => {
     ]);
   });
 
-  it("rejects an inverted date range without writing", () => {
+  it("rejects an inverted date range without writing", async () => {
     const { repository, storage } = createInMemoryRepository();
     const before = storage.getItem(STORAGE_KEY);
-    expect(() =>
+    await expect(
       repository.getUsageSummary("cust_meridians", {
         from: "2026-07-01",
         to: "2026-06-01",
       })
-    ).toThrow(/From date must be on or before To date/);
+    ).rejects.toThrow(/From date must be on or before To date/);
     expect(storage.getItem(STORAGE_KEY)).toBe(before);
   });
 
-  it("returns an empty summary for a customer without ledger history", () => {
+  it("returns an empty summary for a customer without ledger history", async () => {
     const { repository } = createInMemoryRepository();
-    expect(repository.getUsageSummary("cust_northwind", {})).toEqual({
+    expect(await repository.getUsageSummary("cust_northwind", {})).toEqual({
       customerId: "cust_northwind",
       rows: [],
       netTokensConsumed: 0,

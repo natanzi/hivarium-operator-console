@@ -61,14 +61,14 @@ describe("CreateCustomerPage", () => {
     );
   });
 
-  it("blocks submission when the derived id already exists", () => {
+  it("blocks submission when the derived id already exists", async () => {
     renderCreatePage();
     const form = screen.getByTestId("submit-customer").closest("form")!;
     // "Northwind" derives to cust_northwind, which already exists in the seed.
     fireEvent.change(form.querySelector("[name='name']")!, {
       target: { value: "Northwind" },
     });
-    expect(screen.getByTestId("duplicate-note")).toBeInTheDocument();
+    expect(await screen.findByTestId("duplicate-note")).toBeInTheDocument();
     expect(screen.getByTestId("submit-customer")).toBeDisabled();
   });
 

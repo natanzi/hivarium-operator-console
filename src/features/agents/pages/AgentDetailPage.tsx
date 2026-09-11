@@ -1,5 +1,5 @@
 import { ArrowLeft, Boxes } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,10 +12,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/Layout";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PLAN_LABELS, SEED_NOW } from "@/data/seed-data";
 import { useRepository } from "@/data/repository-context";
 import type { AgentCustomerAccessRow } from "@/data/local-storage-repository";
-import type { PlanTier } from "@/domain/types";
+import type { AgentProduct, PlanTier } from "@/domain/types";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -24,22 +25,86 @@ import { cn } from "@/lib/utils";
  *
  * Shows the agent product identity/capability and the reverse projection of
  * every customer holding current or scheduled access to it. Catalog editing
- * remains out of scope.
+ * remains out of scope. Reads flow through the asynchronous
+ * {@link HiveRepository}: the page shows a skeleton while loading and a
+ * restrained error state with Retry that re-runs the same read.
  */
 export function AgentDetailPage() {
   const { agentProductId = "" } = useParams<{ agentProductId: string }>();
   const repo = useRepository();
+  // `undefined` means still loading; `null` means the agent does not exist.
+  const [product, setProduct] = useState<AgentProduct | null | undefined>(
+    undefined
+  );
+  const [accessRows, setAccessRows] = useState<AgentCustomerAccessRow[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const product = useMemo(
-    () => repo.getAgentProduct(agentProductId),
-    [repo, agentProductId]
-  );
-  const accessRows = useMemo(
-    () => repo.listCustomersWithAgentAccess(agentProductId, SEED_NOW),
-    [repo, agentProductId]
-  );
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const [found, rows] = await Promise.all([
+        repo.getAgentProduct(agentProductId),
+        repo.listCustomersWithAgentAccess(agentProductId, SEED_NOW),
+      ]);
+      // The repository reports a missing agent as `undefined`; the page
+      // reserves `undefined` for the loading state, so map to `null` to
+      // reach the not-found state.
+      setProduct(found ?? null);
+      setAccessRows(rows);
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : "Could not load agent."
+      );
+    }
+  }, [repo, agentProductId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   const currentRows = accessRows.filter((row) => row.status === "active");
   const scheduledRows = accessRows.filter((row) => row.status === "scheduled");
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          title="Agent detail"
+          id="agent-detail-title"
+          description="Agent product identity, capability and customer access."
+        />
+        <div
+          className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-center"
+          data-testid="agent-detail-error"
+        >
+          <Boxes className="text-muted-foreground size-10" />
+          <h2 className="text-lg font-semibold">Unable to load agent</h2>
+          <p className="text-muted-foreground max-w-sm text-sm">{loadError}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            data-testid="retry-agent-detail"
+          >
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (product === undefined) {
+    return (
+      <div className="flex flex-col gap-6" data-testid="agent-detail-loading">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-1/3" />
+          <Skeleton className="h-8 w-28" />
+        </div>
+        <Skeleton className="h-40 w-full rounded-xl" />
+        <Skeleton className="h-40 w-full rounded-xl" />
+      </div>
+    );
+  }
 
   if (!product) {
     return (

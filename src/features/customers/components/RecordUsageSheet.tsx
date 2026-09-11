@@ -222,10 +222,10 @@ export function RecordUsageSheet({
     // Capture the ledger before the call so an idempotent replay (which
     // performs no write) can be distinguished from a fresh debit.
     const existingTransactionIds = new Set(
-      repo.listLedgerTransactions(customer.id).map((t) => t.id)
+      (await repo.listLedgerTransactions(customer.id)).map((t) => t.id)
     );
     try {
-      const result = repo.recordUsageDebit(
+      const result = await repo.recordUsageDebit(
         {
           customerId: customer.id,
           agentProductId: form.getValues("agentProductId"),

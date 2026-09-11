@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,6 +81,7 @@ export function TokenStatement({
   statementRows,
   products,
   activePrepaid,
+  readOnly,
   onRecordUsage,
   onAddCredit,
   onReverseTransaction,
@@ -94,6 +95,8 @@ export function TokenStatement({
   products: Map<string, AgentProduct>;
   /** Whether the customer currently has an active prepaid arrangement. */
   activePrepaid: boolean;
+  /** Archived customers keep the statement readable but hide every mutation. */
+  readOnly: boolean;
   onRecordUsage: () => void;
   onAddCredit: () => void;
   onReverseTransaction: (transaction: LedgerTransaction) => void;
@@ -103,6 +106,8 @@ export function TokenStatement({
   const [to, setTo] = useState("");
   const [agentProductId, setAgentProductId] = useState(ALL_AGENTS);
   const [type, setType] = useState(ALL_TYPES);
+  const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const [rangeError, setRangeError] = useState("");
 
   const hasActiveFilters =
     from.trim() !== "" ||
@@ -113,30 +118,38 @@ export function TokenStatement({
   // The filtered statement + selected-period summary always come from the
   // repository (D-16). An inverted range throws, so the last valid result is
   // kept in a ref and the documented error is shown instead (USGE-03, A1).
-  // The query runs on every render so mutations (which re-render the page and
-  // pass fresh `statementRows`) always refresh the filtered view.
-  let summary: UsageSummary | null = null;
-  try {
-    summary = repo.getUsageSummary(
-      customer.id,
-      {
-        from: from.trim() || undefined,
-        to: to.trim() || undefined,
-      },
-      agentProductId === ALL_AGENTS ? undefined : agentProductId,
-      type === ALL_TYPES ? undefined : (type as LedgerTransactionKind)
-    );
-  } catch {
-    summary = null;
-  }
-
+  // The query re-runs whenever the filters or the underlying statement change
+  // (mutations re-render the page and pass fresh `statementRows`).
   const lastValidSummaryRef = useRef<UsageSummary | null>(null);
-  if (summary !== null) {
-    lastValidSummaryRef.current = summary;
-  }
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await repo.getUsageSummary(
+          customer.id,
+          {
+            from: from.trim() || undefined,
+            to: to.trim() || undefined,
+          },
+          agentProductId === ALL_AGENTS ? undefined : agentProductId,
+          type === ALL_TYPES ? undefined : (type as LedgerTransactionKind)
+        );
+        if (cancelled) return;
+        lastValidSummaryRef.current = result;
+        setSummary(result);
+        setRangeError("");
+      } catch {
+        if (cancelled) return;
+        setSummary(null);
+        setRangeError("From date must be on or before To date.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [repo, customer.id, from, to, agentProductId, type, statementRows]);
+
   const visibleSummary = summary ?? lastValidSummaryRef.current;
-  const rangeError =
-    summary === null ? "From date must be on or before To date." : "";
   const visibleRows = visibleSummary?.rows ?? statementRows;
   const isEmptyAccount = statementRows.length === 0;
   const isEmptyFiltered = !isEmptyAccount && visibleRows.length === 0;
@@ -298,6 +311,7 @@ export function TokenStatement({
             </Badge>
           );
         }
+        if (readOnly) return null;
         return (
           <Button
             variant="ghost"
@@ -325,7 +339,7 @@ export function TokenStatement({
             Balance {formatTokens(balanceTokens)}
           </p>
         </div>
-        {activePrepaid ? (
+        {activePrepaid && !readOnly ? (
           <Button
             onClick={onRecordUsage}
             data-testid="record-usage"
@@ -436,7 +450,7 @@ export function TokenStatement({
             Add token credit to create this customer&apos;s first immutable
             statement entry.
           </p>
-          {activePrepaid ? (
+          {activePrepaid && !readOnly ? (
             <Button
               variant="outline"
               size="sm"

@@ -137,19 +137,18 @@ export function ReversalSheet({
     onOpenChange(false);
   }
 
-  function handleReview() {
+  async function handleReview() {
     setBlockedMessage("");
     // A target that has already been reversed is rejected by the repository
     // with the precise reason at confirmation time, so the negative-balance
     // preview must not pre-empt it (the derived balance is already zeroed by
     // the earlier reversal). Only a not-yet-reversed target is blocked
     // client-side when the resulting balance would be negative.
-    const alreadyReversed = repo
-      .listLedgerTransactions(customer.id)
-      .some(
-        (t) =>
-          t.kind === "reversal" && t.reversesTransactionId === transaction.id
-      );
+    const transactions = await repo.listLedgerTransactions(customer.id);
+    const alreadyReversed = transactions.some(
+      (t) =>
+        t.kind === "reversal" && t.reversesTransactionId === transaction.id
+    );
     if (!alreadyReversed && resultingBalance < 0) {
       setBlockedMessage(
         "Transaction cannot be reversed because the resulting balance would be negative."
@@ -165,7 +164,7 @@ export function ReversalSheet({
     // is disabled before the synchronous repository write.
     await new Promise((resolve) => setTimeout(resolve, 0));
     try {
-      repo.reverseTransaction(
+      await repo.reverseTransaction(
         {
           customerId: customer.id,
           transactionId: transaction.id,

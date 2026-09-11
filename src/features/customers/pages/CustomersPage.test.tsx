@@ -6,11 +6,18 @@ import { createInMemoryRepository } from "@/data/local-storage-repository";
 import { RepositoryProvider } from "@/data/repository-context";
 
 describe("CustomersPage deletion", () => {
-  it("requires confirmation and removes the customer with related local records", async () => {
+  it("requires confirmation and archives the customer while retaining related records", async () => {
     const { repository } = createInMemoryRepository();
-    const customer = repository
-      .listCustomers()
-      .find((candidate) => repository.getSubscriptions(candidate.id).length > 0)!;
+    const customers = await repository.listCustomers();
+    const customer = (
+      await Promise.all(
+        customers.map(async (candidate) => ({
+          candidate,
+          hasSubscriptions:
+            (await repository.getSubscriptions(candidate.id)).length > 0,
+        }))
+      )
+    ).find((entry) => entry.hasSubscriptions)!.candidate;
 
     render(
       <RepositoryProvider repository={repository}>
@@ -18,32 +25,38 @@ describe("CustomersPage deletion", () => {
       </RepositoryProvider>
     );
 
-    fireEvent.click(screen.getByTestId(`delete-${customer.id}`));
+    fireEvent.click(await screen.findByTestId(`archive-${customer.id}`));
 
     expect(
-      screen.getByRole("heading", { name: `Delete ${customer.name}?` })
+      await screen.findByRole("heading", { name: `Archive ${customer.name}?` })
     ).toBeInTheDocument();
-    expect(repository.getCustomer(customer.id)).toBeDefined();
+    expect((await repository.getCustomer(customer.id))?.status).not.toBe(
+      "archived"
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(repository.getCustomer(customer.id)).toBeDefined();
+    expect((await repository.getCustomer(customer.id))?.status).not.toBe(
+      "archived"
+    );
 
-    fireEvent.click(screen.getByTestId(`delete-${customer.id}`));
-    fireEvent.click(screen.getByTestId(`confirm-delete-${customer.id}`));
+    fireEvent.click(await screen.findByTestId(`archive-${customer.id}`));
+    fireEvent.click(
+      await screen.findByTestId(`confirm-archive-${customer.id}`)
+    );
 
     await waitFor(() =>
       expect(screen.queryByTestId(`customer-row-${customer.id}`)).not.toBeInTheDocument()
     );
-    expect(repository.getCustomer(customer.id)).toBeUndefined();
-    expect(repository.getSubscriptions(customer.id)).toHaveLength(0);
-    expect(repository.getFeatureEntitlements(customer.id)).toHaveLength(0);
-    expect(repository.getAgentLicenses(customer.id)).toHaveLength(0);
-    expect(screen.getByTestId("summary-total")).toHaveTextContent("5");
+    expect((await repository.getCustomer(customer.id))?.status).toBe("archived");
+    expect(await repository.getSubscriptions(customer.id)).not.toHaveLength(0);
+    expect(await repository.getFeatureEntitlements(customer.id)).not.toHaveLength(0);
+    expect(await repository.getAgentLicenses(customer.id)).not.toHaveLength(0);
+    expect(screen.getByTestId("summary-total")).toHaveTextContent("6");
   });
 });
 
 describe("CustomersPage prepaid balance", () => {
-  it("shows the derived token balance for an active prepaid customer without a low-balance badge above threshold", () => {
+  it("shows the derived token balance for an active prepaid customer without a low-balance badge above threshold", async () => {
     const { repository } = createInMemoryRepository();
     render(
       <RepositoryProvider repository={repository}>
@@ -51,21 +64,21 @@ describe("CustomersPage prepaid balance", () => {
       </RepositoryProvider>
     );
 
-    const row = screen.getByTestId("customer-row-cust_meridians");
+    const row = await screen.findByTestId("customer-row-cust_meridians");
     expect(row).toHaveTextContent("250,000 tokens");
     expect(screen.queryByTestId("low-balance-cust_meridians")).not.toBeInTheDocument();
   });
 
-  it("shows the Low balance badge with accessible balance and threshold text at or below threshold", () => {
+  it("shows the Low balance badge with accessible balance and threshold text at or below threshold", async () => {
     const { repository } = createInMemoryRepository();
-    repository.updateWarningThreshold("cust_meridians", 300000);
+    await repository.updateWarningThreshold("cust_meridians", 300000);
     render(
       <RepositoryProvider repository={repository}>
         <CustomersPage />
       </RepositoryProvider>
     );
 
-    const row = screen.getByTestId("customer-row-cust_meridians");
+    const row = await screen.findByTestId("customer-row-cust_meridians");
     expect(row).toHaveTextContent("250,000 tokens");
     expect(row).toHaveTextContent("300,000 tokens");
     const badge = screen.getByTestId("low-balance-cust_meridians");
@@ -75,7 +88,7 @@ describe("CustomersPage prepaid balance", () => {
     );
   });
 
-  it("does not show a token balance for customers without an active prepaid arrangement", () => {
+  it("does not show a token balance for customers without an active prepaid arrangement", async () => {
     const { repository } = createInMemoryRepository();
     render(
       <RepositoryProvider repository={repository}>
@@ -83,7 +96,7 @@ describe("CustomersPage prepaid balance", () => {
       </RepositoryProvider>
     );
 
-    const row = screen.getByTestId("customer-row-cust_northwind");
+    const row = await screen.findByTestId("customer-row-cust_northwind");
     expect(row).not.toHaveTextContent("tokens");
     expect(screen.queryByTestId("low-balance-cust_northwind")).not.toBeInTheDocument();
   });

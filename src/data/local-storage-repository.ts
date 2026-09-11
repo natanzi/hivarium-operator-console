@@ -156,38 +156,61 @@ export interface UsageSummary {
 }
 
 /**
+ * The verified operator identity derived from the Cloudflare Access JWT.
+ * Returned by {@link HiveRepository.getCurrentOperator} (which calls
+ * `GET /api/me` on the API-backed repository).
+ */
+export interface OperatorIdentity {
+  email: string;
+  sub: string;
+  name: string;
+}
+
+/**
  * Repository contract.
  *
- * All methods are synchronous so that the UI can render without async
- * coordination. Mutations are persisted to localStorage when available.
+ * All methods are asynchronous and return Promises so the data layer can move
+ * to durable server-backed storage without changing the UI contract.
+ * Mutations are persisted to localStorage when available.
  *
- * The commercial/access methods operate on the canonical schemaVersion 3
+ * The commercial/access methods operate on the canonical schemaVersion 4
  * records. `getSubscriptions` and `getAgentLicenses` are narrow compatibility
  * projections derived from those canonical records for the pre-migration UI;
  * they are not competing active models.
  */
 export interface HiveRepository {
   /** Whether the repository has any customers to display. */
-  hasData(): boolean;
+  hasData(): Promise<boolean>;
+
+  /**
+   * The verified operator identity for the current session (calls
+   * `GET /api/me` on the API-backed repository). Throws when the operator is
+   * not signed in (HTTP 401).
+   */
+  getCurrentOperator(): Promise<OperatorIdentity>;
 
   /** Seed the store with the canonical six customers (replaces current). */
-  reset(): void;
+  reset(): Promise<void>;
 
   // --- Customers -----------------------------------------------------------
-  listCustomers(): Customer[];
-  getCustomer(id: string): Customer | undefined;
-  createCustomer(input: CustomerInput): Customer;
-  updateCustomer(id: string, input: CustomerInput): Customer;
-  deleteCustomer(id: string): void;
+  listCustomers(): Promise<Customer[]>;
+  getCustomer(id: string): Promise<Customer | undefined>;
+  createCustomer(input: CustomerInput): Promise<Customer>;
+  updateCustomer(id: string, input: CustomerInput): Promise<Customer>;
+  /**
+   * Archive a customer: set its lifecycle status to `"archived"` while
+   * retaining every dependent record (arrangements, grants, ledger, usage).
+   */
+  archiveCustomer(id: string): Promise<void>;
 
   // --- Legacy compatibility projections (derived from canonical records) ---
-  getSubscriptions(customerId: string): Subscription[];
-  getFeatureEntitlements(customerId: string): FeatureEntitlement[];
-  getAgentLicenses(customerId: string): AgentLicense[];
+  getSubscriptions(customerId: string): Promise<Subscription[]>;
+  getFeatureEntitlements(customerId: string): Promise<FeatureEntitlement[]>;
+  getAgentLicenses(customerId: string): Promise<AgentLicense[]>;
 
   // --- Catalog -------------------------------------------------------------
-  listAgentProducts(): AgentProduct[];
-  getAgentProduct(id: string): AgentProduct | undefined;
+  listAgentProducts(): Promise<AgentProduct[]>;
+  getAgentProduct(id: string): Promise<AgentProduct | undefined>;
   /**
    * Deterministic reverse projection: the set of customers holding an
    * `active` or `scheduled` access grant to `agentProductId` at `asOf`.
@@ -197,18 +220,20 @@ export interface HiveRepository {
   listCustomersWithAgentAccess(
     agentProductId: string,
     asOf: string | number
-  ): AgentCustomerAccessRow[];
+  ): Promise<AgentCustomerAccessRow[]>;
 
   // --- Commercial arrangements --------------------------------------------
-  listCommercialArrangements(customerId: string): CommercialArrangement[];
+  listCommercialArrangements(
+    customerId: string
+  ): Promise<CommercialArrangement[]>;
   getCommercialSnapshot(
     customerId: string,
     asOf: string | number
-  ): CommercialSnapshot;
+  ): Promise<CommercialSnapshot>;
   saveCommercialArrangement(
     input: CommercialArrangementInput,
     occurredAt: string
-  ): CommercialArrangement;
+  ): Promise<CommercialArrangement>;
   /**
    * Terminate a customer's commercial arrangement at `occurredAt`. The
    * arrangement is closed (`status: "terminated"`), every currently active
@@ -219,22 +244,25 @@ export interface HiveRepository {
   terminateCommercialArrangement(
     input: { arrangementId: string; customerId: string; reason: string },
     occurredAt: string
-  ): CommercialArrangement;
+  ): Promise<CommercialArrangement>;
   /**
    * Reconcile a customer's commercial and access lifecycle at `asOf`:
    * activate due scheduled arrangements, close expired arrangements, and
    * revoke any still-active grants when no active arrangement exists.
    * Idempotent for a repeated `asOf`.
    */
-  reconcileCommercialLifecycle(customerId: string, asOf: string): void;
+  reconcileCommercialLifecycle(customerId: string, asOf: string): Promise<void>;
 
   // --- Agent access grants -------------------------------------------------
-  listAgentAccessGrants(customerId: string): AgentAccessGrant[];
+  listAgentAccessGrants(customerId: string): Promise<AgentAccessGrant[]>;
   getAgentAccessSnapshot(
     customerId: string,
     asOf: string | number
-  ): AgentAccessSnapshot;
-  grantAgentAccess(input: AgentAccessGrantInput, occurredAt: string): AgentAccessGrant;
+  ): Promise<AgentAccessSnapshot>;
+  grantAgentAccess(
+    input: AgentAccessGrantInput,
+    occurredAt: string
+  ): Promise<AgentAccessGrant>;
   /**
    * Revoke an agent access grant immediately or on an explicit future date.
    * The grant record is retained and marked `revokedAt`/`scheduledRevokeAt`
@@ -243,23 +271,23 @@ export interface HiveRepository {
   revokeAgentAccess(
     input: { grantId: string; customerId: string; reason: string; effectiveAt?: string },
     occurredAt: string
-  ): AgentAccessGrant;
+  ): Promise<AgentAccessGrant>;
 
   // --- Activity ------------------------------------------------------------
   /** Chronological (newest first) activity events for a customer. */
-  listActivityEvents(customerId: string): ActivityEvent[];
+  listActivityEvents(customerId: string): Promise<ActivityEvent[]>;
 
   // --- Prepaid token ledger ------------------------------------------------
   /**
    * Chronological (oldest first) immutable ledger transactions for a customer.
    */
-  listLedgerTransactions(customerId: string): LedgerTransaction[];
+  listLedgerTransactions(customerId: string): Promise<LedgerTransaction[]>;
   /**
    * Derived token balance for a customer: the signed sum of the customer's
    * immutable ledger transactions. Zero for an empty ledger. No stored
    * balance counter exists.
    */
-  getTokenBalance(customerId: string): number;
+  getTokenBalance(customerId: string): Promise<number>;
   /**
    * As-of projection of the customer's prepaid token account: the active
    * prepaid arrangement (or `null`), the derived balance, the transaction
@@ -268,7 +296,7 @@ export interface HiveRepository {
   getPrepaidSnapshot(
     customerId: string,
     asOf: string | number
-  ): PrepaidSnapshot;
+  ): Promise<PrepaidSnapshot>;
   /**
    * Append exactly one immutable `credit_grant` transaction for a customer
    * with an active prepaid arrangement. Validates positive whole tokens and a
@@ -282,7 +310,7 @@ export interface HiveRepository {
       reason?: string;
     },
     occurredAt: string
-  ): LedgerTransaction;
+  ): Promise<LedgerTransaction>;
   /**
    * Record an atomic usage debit: one {@link UsageRecord} plus one linked
    * `usage_debit` ledger transaction in a single write (D-08, USGE-01).
@@ -301,7 +329,7 @@ export interface HiveRepository {
       reason?: string;
     },
     occurredAt: string
-  ): { usage: UsageRecord; transaction: LedgerTransaction };
+  ): Promise<{ usage: UsageRecord; transaction: LedgerTransaction }>;
   /**
    * Append exactly one immutable `manual_adjustment` transaction with a
    * required reason and reference (D-06, LEDG-04). The amount must be a
@@ -316,7 +344,7 @@ export interface HiveRepository {
       reason: string;
     },
     occurredAt: string
-  ): LedgerTransaction;
+  ): Promise<LedgerTransaction>;
   /**
    * Append exactly one immutable `reversal` transaction that negates the full
    * amount of its target exactly once, with a required reason and reference
@@ -333,7 +361,7 @@ export interface HiveRepository {
       reason: string;
     },
     occurredAt: string
-  ): LedgerTransaction;
+  ): Promise<LedgerTransaction>;
   /**
    * Update the warning threshold (non-negative whole tokens) on the active
    * prepaid arrangement. Configuration only — never creates a ledger
@@ -342,12 +370,12 @@ export interface HiveRepository {
   updateWarningThreshold(
     customerId: string,
     thresholdTokens: number
-  ): PrepaidCommercialArrangement;
+  ): Promise<PrepaidCommercialArrangement>;
   /**
    * Derived chronological statement rows for a customer (LEDG-05): newest-first
    * display rows with full-account running balances. Read-only; never writes.
    */
-  getAccountStatement(customerId: string): AccountStatementRow[];
+  getAccountStatement(customerId: string): Promise<AccountStatementRow[]>;
   /**
    * Filtered statement rows plus the selected-period usage summary (USGE-03,
    * USGE-04): net tokens consumed and a compact per-agent breakdown ordered
@@ -360,7 +388,7 @@ export interface HiveRepository {
     period: UsagePeriod,
     agentProductId?: string,
     type?: LedgerTransactionKind
-  ): UsageSummary;
+  ): Promise<UsageSummary>;
 }
 
 export type StorageLike = Pick<
@@ -567,10 +595,15 @@ function normalizeV2Store(raw: Record<string, unknown>): DataStore {
 }
 
 /**
- * Upgrade an arbitrary persisted payload to the canonical schemaVersion 2
+ * Upgrade an arbitrary persisted payload to the canonical schemaVersion 4
  * {@link DataStore}. This is the only persisted-format upgrade seam.
  *
- * - A canonical v2 payload is normalized (customer statuses) and returned.
+ * - A canonical v4 payload is normalized (customer statuses) and returned.
+ * - A canonical v3 payload is upgraded deterministically (v3→v4): every
+ *   generalized collection is preserved unchanged and only the schema version
+ *   and customer status normalization change. The `archived` status passes
+ *   through; records without it are unchanged. No legacy conversion runs, so
+ *   ledger and usage rows are never dropped.
  * - A legacy v1 payload keeps every customer, entitlement, and catalog
  *   product while `Subscription` meaning becomes monthly
  *   {@link CommercialArrangement} records and `AgentLicense` meaning becomes
@@ -585,6 +618,13 @@ export function migrateStore(raw: unknown): DataStore {
   if (!isRecord(raw)) return buildSeedStore();
 
   if (raw.schemaVersion === STORE_SCHEMA_VERSION) {
+    return normalizeV2Store(raw);
+  }
+
+  // v3 → v4 (D-05): a canonical v3 payload already carries every generalized
+  // collection in the active shape. The only change is the schema version and
+  // customer status normalization, so the canonical normalizer is sufficient.
+  if (raw.schemaVersion === 3) {
     return normalizeV2Store(raw);
   }
 
@@ -758,11 +798,21 @@ export class LocalStorageRepository implements HiveRepository {
   }
 
   // -- HiveRepository -------------------------------------------------------
-  hasData(): boolean {
-    return this.listCustomers().length > 0;
+  async hasData(): Promise<boolean> {
+    return (await this.listCustomers()).length > 0;
   }
 
-  reset(): void {
+  async getCurrentOperator(): Promise<OperatorIdentity> {
+    // The local demo has no authentication surface; report a deterministic
+    // operator so the sidebar can render a signed-in state.
+    return {
+      email: "operator@hivarium.local",
+      sub: "local-demo-operator",
+      name: "Local Operator",
+    };
+  }
+
+  async reset(): Promise<void> {
     const seeded = buildSeedStore();
     if (this.storage) {
       this.storage.removeItem(this.key);
@@ -770,15 +820,15 @@ export class LocalStorageRepository implements HiveRepository {
     this.write(seeded);
   }
 
-  listCustomers(): Customer[] {
+  async listCustomers(): Promise<Customer[]> {
     return this.read().customers;
   }
 
-  getCustomer(id: string): Customer | undefined {
+  async getCustomer(id: string): Promise<Customer | undefined> {
     return this.read().customers.find((c) => c.id === id);
   }
 
-  createCustomer(input: CustomerInput): Customer {
+  async createCustomer(input: CustomerInput): Promise<Customer> {
     const now = new Date(2026, 0, 1).toISOString(); // deterministic
     const store = this.read();
     if (store.customers.some((c) => c.id === input.id)) {
@@ -789,7 +839,7 @@ export class LocalStorageRepository implements HiveRepository {
     return created;
   }
 
-  updateCustomer(id: string, input: CustomerInput): Customer {
+  async updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
     const store = this.read();
     const existing = store.customers.find((c) => c.id === id);
     if (!existing) {
@@ -803,37 +853,21 @@ export class LocalStorageRepository implements HiveRepository {
     return updated;
   }
 
-  deleteCustomer(id: string): void {
+  async archiveCustomer(id: string): Promise<void> {
     const store = this.read();
     if (!store.customers.some((c) => c.id === id)) {
       throw new Error(`Customer with id "${id}" does not exist`);
     }
     this.write({
       ...store,
-      customers: store.customers.filter((c) => c.id !== id),
-      featureEntitlements: store.featureEntitlements.filter(
-        (entitlement) => entitlement.customerId !== id
-      ),
-      commercialArrangements: store.commercialArrangements.filter(
-        (arrangement) => arrangement.customerId !== id
-      ),
-      agentAccessGrants: store.agentAccessGrants.filter(
-        (grant) => grant.customerId !== id
-      ),
-      activityEvents: store.activityEvents.filter(
-        (event) => event.customerId !== id
-      ),
-      ledgerTransactions: store.ledgerTransactions.filter(
-        (transaction) => transaction.customerId !== id
-      ),
-      usageRecords: store.usageRecords.filter(
-        (usage) => usage.customerId !== id
+      customers: store.customers.map((c) =>
+        c.id === id ? { ...c, status: "archived" } : c
       ),
     });
   }
 
   // -- Legacy compatibility projections -------------------------------------
-  getSubscriptions(customerId: string): Subscription[] {
+  async getSubscriptions(customerId: string): Promise<Subscription[]> {
     return this.read()
       .commercialArrangements.filter(
         (arrangement) => arrangement.customerId === customerId
@@ -842,30 +876,32 @@ export class LocalStorageRepository implements HiveRepository {
       .map((arrangement) => arrangementToSubscription(arrangement));
   }
 
-  getFeatureEntitlements(customerId: string): FeatureEntitlement[] {
+  async getFeatureEntitlements(
+    customerId: string
+  ): Promise<FeatureEntitlement[]> {
     return this.read().featureEntitlements.filter(
       (fe) => fe.customerId === customerId
     );
   }
 
-  getAgentLicenses(customerId: string): AgentLicense[] {
+  async getAgentLicenses(customerId: string): Promise<AgentLicense[]> {
     return this.read()
       .agentAccessGrants.filter((grant) => grant.customerId === customerId)
       .map((grant) => grantToLicense(grant));
   }
 
-  listAgentProducts(): AgentProduct[] {
+  async listAgentProducts(): Promise<AgentProduct[]> {
     return this.read().agentProducts;
   }
 
-  getAgentProduct(id: string): AgentProduct | undefined {
+  async getAgentProduct(id: string): Promise<AgentProduct | undefined> {
     return this.read().agentProducts.find((p) => p.id === id);
   }
 
-  listCustomersWithAgentAccess(
+  async listCustomersWithAgentAccess(
     agentProductId: string,
     asOf: string | number
-  ): AgentCustomerAccessRow[] {
+  ): Promise<AgentCustomerAccessRow[]> {
     const asOfIso = toIsoTimestamp(asOf);
     const rows: AgentCustomerAccessRow[] = [];
     for (const grant of this.read().agentAccessGrants) {
@@ -899,18 +935,20 @@ export class LocalStorageRepository implements HiveRepository {
   }
 
   // -- Commercial arrangements ----------------------------------------------
-  listCommercialArrangements(customerId: string): CommercialArrangement[] {
+  async listCommercialArrangements(
+    customerId: string
+  ): Promise<CommercialArrangement[]> {
     return this.read().commercialArrangements.filter(
       (arrangement) => arrangement.customerId === customerId
     );
   }
 
-  getCommercialSnapshot(
+  async getCommercialSnapshot(
     customerId: string,
     asOf: string | number
-  ): CommercialSnapshot {
+  ): Promise<CommercialSnapshot> {
     const asOfIso = toIsoTimestamp(asOf);
-    const arrangements = this.listCommercialArrangements(customerId);
+    const arrangements = await this.listCommercialArrangements(customerId);
     const projection = projectCommercialState(arrangements, asOf);
     return {
       customerId,
@@ -921,10 +959,10 @@ export class LocalStorageRepository implements HiveRepository {
     };
   }
 
-  saveCommercialArrangement(
+  async saveCommercialArrangement(
     input: CommercialArrangementInput,
     occurredAt: string
-  ): CommercialArrangement {
+  ): Promise<CommercialArrangement> {
     const store = this.read();
     const customerId = input.customerId as string;
     if (!store.customers.some((c) => c.id === customerId)) {
@@ -939,10 +977,10 @@ export class LocalStorageRepository implements HiveRepository {
     return result.arrangement;
   }
 
-  terminateCommercialArrangement(
+  async terminateCommercialArrangement(
     input: { arrangementId: string; customerId: string; reason: string },
     occurredAt: string
-  ): CommercialArrangement {
+  ): Promise<CommercialArrangement> {
     const store = this.read();
     const arrangement = store.commercialArrangements.find(
       (a) => a.id === input.arrangementId && a.customerId === input.customerId
@@ -1007,7 +1045,10 @@ export class LocalStorageRepository implements HiveRepository {
     return next.commercialArrangements.find((a) => a.id === arrangement.id)!;
   }
 
-  reconcileCommercialLifecycle(customerId: string, asOf: string): void {
+  async reconcileCommercialLifecycle(
+    customerId: string,
+    asOf: string
+  ): Promise<void> {
     const store = this.read();
     const result = reconcileCommercialLifecycle(store, customerId, asOf);
     if (result.changed) {
@@ -1016,18 +1057,18 @@ export class LocalStorageRepository implements HiveRepository {
   }
 
   // -- Agent access grants --------------------------------------------------
-  listAgentAccessGrants(customerId: string): AgentAccessGrant[] {
+  async listAgentAccessGrants(customerId: string): Promise<AgentAccessGrant[]> {
     return this.read().agentAccessGrants.filter(
       (grant) => grant.customerId === customerId
     );
   }
 
-  getAgentAccessSnapshot(
+  async getAgentAccessSnapshot(
     customerId: string,
     asOf: string | number
-  ): AgentAccessSnapshot {
+  ): Promise<AgentAccessSnapshot> {
     const asOfIso = toIsoTimestamp(asOf);
-    const grants = this.listAgentAccessGrants(customerId);
+    const grants = await this.listAgentAccessGrants(customerId);
     const current = grants.filter(
       (grant) => resolveAgentAccessStatus(grant, asOf) === "active"
     );
@@ -1043,10 +1084,10 @@ export class LocalStorageRepository implements HiveRepository {
     return { customerId, asOf: asOfIso, current, scheduled, history };
   }
 
-  grantAgentAccess(
+  async grantAgentAccess(
     input: AgentAccessGrantInput,
     occurredAt: string
-  ): AgentAccessGrant {
+  ): Promise<AgentAccessGrant> {
     const normalizedInput: AgentAccessGrantInput = {
       ...input,
       createdAt: input.createdAt ?? occurredAt,
@@ -1115,7 +1156,7 @@ export class LocalStorageRepository implements HiveRepository {
     return grant;
   }
 
-  revokeAgentAccess(
+  async revokeAgentAccess(
     input: {
       grantId: string;
       customerId: string;
@@ -1123,7 +1164,7 @@ export class LocalStorageRepository implements HiveRepository {
       effectiveAt?: string;
     },
     occurredAt: string
-  ): AgentAccessGrant {
+  ): Promise<AgentAccessGrant> {
     const store = this.read();
     const grant = store.agentAccessGrants.find(
       (g) => g.id === input.grantId && g.customerId === input.customerId
@@ -1151,14 +1192,16 @@ export class LocalStorageRepository implements HiveRepository {
   }
 
   // -- Activity ------------------------------------------------------------
-  listActivityEvents(customerId: string): ActivityEvent[] {
+  async listActivityEvents(customerId: string): Promise<ActivityEvent[]> {
     return this.read()
       .activityEvents.filter((event) => event.customerId === customerId)
       .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
   }
 
   // -- Prepaid token ledger ------------------------------------------------
-  listLedgerTransactions(customerId: string): LedgerTransaction[] {
+  async listLedgerTransactions(
+    customerId: string
+  ): Promise<LedgerTransaction[]> {
     return this.read()
       .ledgerTransactions.filter(
         (transaction) => transaction.customerId === customerId
@@ -1166,20 +1209,20 @@ export class LocalStorageRepository implements HiveRepository {
       .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
   }
 
-  getTokenBalance(customerId: string): number {
+  async getTokenBalance(customerId: string): Promise<number> {
     return deriveTokenBalance(this.read().ledgerTransactions, customerId);
   }
 
-  getPrepaidSnapshot(
+  async getPrepaidSnapshot(
     customerId: string,
     asOf: string | number
-  ): PrepaidSnapshot {
+  ): Promise<PrepaidSnapshot> {
     const asOfIso = toIsoTimestamp(asOf);
     const transactions = this.read().ledgerTransactions.filter(
       (transaction) => transaction.customerId === customerId
     );
     const balanceTokens = deriveTokenBalance(transactions, customerId);
-    const commercial = this.getCommercialSnapshot(customerId, asOf);
+    const commercial = await this.getCommercialSnapshot(customerId, asOf);
     const arrangement =
       commercial.active?.model === "prepaid" ? commercial.active : null;
     return {
@@ -1194,7 +1237,7 @@ export class LocalStorageRepository implements HiveRepository {
     };
   }
 
-  addCreditGrant(
+  async addCreditGrant(
     input: {
       customerId: string;
       amountTokens: number;
@@ -1202,13 +1245,14 @@ export class LocalStorageRepository implements HiveRepository {
       reason?: string;
     },
     occurredAt: string
-  ): LedgerTransaction {
+  ): Promise<LedgerTransaction> {
     const store = this.read();
     const customerId = input.customerId;
     if (!store.customers.some((c) => c.id === customerId)) {
       throw new Error(`Customer with id "${customerId}" does not exist`);
     }
-    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    const active = (await this.getCommercialSnapshot(customerId, occurredAt))
+      .active;
     if (!active || active.model !== "prepaid") {
       throw new Error(
         `Customer "${customerId}" does not have an active prepaid arrangement.`
@@ -1239,7 +1283,7 @@ export class LocalStorageRepository implements HiveRepository {
     return transaction;
   }
 
-  recordUsageDebit(
+  async recordUsageDebit(
     input: {
       customerId: string;
       agentProductId: string;
@@ -1248,13 +1292,14 @@ export class LocalStorageRepository implements HiveRepository {
       reason?: string;
     },
     occurredAt: string
-  ): { usage: UsageRecord; transaction: LedgerTransaction } {
+  ): Promise<{ usage: UsageRecord; transaction: LedgerTransaction }> {
     const store = this.read();
     const customerId = input.customerId.trim();
     if (!store.customers.some((c) => c.id === customerId)) {
       throw new Error(`Customer with id "${customerId}" does not exist`);
     }
-    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    const active = (await this.getCommercialSnapshot(customerId, occurredAt))
+      .active;
     if (!active || active.model !== "prepaid") {
       throw new Error(
         `Customer "${customerId}" does not have an active prepaid arrangement.`
@@ -1305,7 +1350,7 @@ export class LocalStorageRepository implements HiveRepository {
     return { usage: result.usage, transaction: result.transaction };
   }
 
-  addManualAdjustment(
+  async addManualAdjustment(
     input: {
       customerId: string;
       amountTokens: number;
@@ -1313,13 +1358,14 @@ export class LocalStorageRepository implements HiveRepository {
       reason: string;
     },
     occurredAt: string
-  ): LedgerTransaction {
+  ): Promise<LedgerTransaction> {
     const store = this.read();
     const customerId = input.customerId.trim();
     if (!store.customers.some((c) => c.id === customerId)) {
       throw new Error(`Customer with id "${customerId}" does not exist`);
     }
-    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    const active = (await this.getCommercialSnapshot(customerId, occurredAt))
+      .active;
     if (!active || active.model !== "prepaid") {
       throw new Error(
         `Customer "${customerId}" does not have an active prepaid arrangement.`
@@ -1330,7 +1376,7 @@ export class LocalStorageRepository implements HiveRepository {
     return result.transaction;
   }
 
-  reverseTransaction(
+  async reverseTransaction(
     input: {
       customerId: string;
       transactionId: string;
@@ -1338,13 +1384,14 @@ export class LocalStorageRepository implements HiveRepository {
       reason: string;
     },
     occurredAt: string
-  ): LedgerTransaction {
+  ): Promise<LedgerTransaction> {
     const store = this.read();
     const customerId = input.customerId.trim();
     if (!store.customers.some((c) => c.id === customerId)) {
       throw new Error(`Customer with id "${customerId}" does not exist`);
     }
-    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    const active = (await this.getCommercialSnapshot(customerId, occurredAt))
+      .active;
     if (!active || active.model !== "prepaid") {
       throw new Error(
         `Customer "${customerId}" does not have an active prepaid arrangement.`
@@ -1355,14 +1402,13 @@ export class LocalStorageRepository implements HiveRepository {
     return result.transaction;
   }
 
-  updateWarningThreshold(
+  async updateWarningThreshold(
     customerId: string,
     thresholdTokens: number
-  ): PrepaidCommercialArrangement {
+  ): Promise<PrepaidCommercialArrangement> {
     const store = this.read();
-    const active = this.getCommercialSnapshot(
-      customerId,
-      new Date().toISOString()
+    const active = (
+      await this.getCommercialSnapshot(customerId, new Date().toISOString())
     ).active;
     if (!active || active.model !== "prepaid") {
       throw new Error(
@@ -1390,19 +1436,19 @@ export class LocalStorageRepository implements HiveRepository {
     return updated;
   }
 
-  getAccountStatement(customerId: string): AccountStatementRow[] {
+  async getAccountStatement(customerId: string): Promise<AccountStatementRow[]> {
     return projectAccountStatement(
       this.read().ledgerTransactions,
       customerId
     );
   }
 
-  getUsageSummary(
+  async getUsageSummary(
     customerId: string,
     period: UsagePeriod,
     agentProductId?: string,
     type?: LedgerTransactionKind
-  ): UsageSummary {
+  ): Promise<UsageSummary> {
     const store = this.read();
     const statement = projectAccountStatement(
       store.ledgerTransactions,

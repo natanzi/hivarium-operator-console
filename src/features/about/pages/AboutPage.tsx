@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import {
   Card,
   CardContent,
@@ -17,7 +19,17 @@ import { repository } from "@/data/local-storage-repository";
  * page always matches the catalog actually rendered on the Agents screen.
  */
 export function AboutPage() {
-  const agentProductCount = repository.listAgentProducts().length;
+  const [agentProductCount, setAgentProductCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void repository.listAgentProducts().then((products) => {
+      if (!cancelled) setAgentProductCount(products.length);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex flex-col gap-6">

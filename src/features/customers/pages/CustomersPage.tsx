@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RotateCcw, Search, UserPlus } from "lucide-react";
-import { toast } from "sonner";
 
 import {
   CUSTOMER_STATUS_LABELS,
@@ -23,26 +22,23 @@ import { cn } from "@/lib/utils";
 import { DataTable, type DataTableColumn } from "@/data/data-table";
 import { Avatar } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layout/Layout";
 import { formatTokens } from "@/features/customers/components/format";
-import type {
-  HiveRepository,
-  PrepaidSnapshot,
-} from "@/data/local-storage-repository";
+import { ArchiveCustomerDialog } from "@/features/customers/components/ArchiveCustomerDialog";
+import type { PrepaidSnapshot } from "@/data/local-storage-repository";
 
 type StatusFilter = CustomerStatus | "all";
+
+/** Per-customer related records resolved once per load for the table columns. */
+interface RelatedData {
+  subscriptions: Map<string, Subscription[]>;
+  entitlements: Map<string, FeatureEntitlement[]>;
+  licenses: Map<string, AgentLicense[]>;
+  prepaid: Map<string, PrepaidSnapshot>;
+  productNames: Map<string, string>;
+}
 
 /**
  * Customers list screen.
@@ -50,26 +46,77 @@ type StatusFilter = CustomerStatus | "all";
  * Renders every customer in the repository as a TanStack table with
  * client-side search + status filter. Each row links to the customer
  * profile. The "New customer" button links to the creation screen.
+ *
+ * Reads flow through the asynchronous {@link HiveRepository}: the page shows
+ * a skeleton while loading and a restrained error state with Retry that
+ * re-runs the same read. Archived customers are excluded from the default
+ * list and appear under the Archived lifecycle filter.
  */
 export function CustomersPage() {
   const repo = useRepository();
-  const [customers, setCustomers] = useState<Customer[]>(() =>
-    repo.listCustomers()
-  );
+  const [customers, setCustomers] = useState<Customer[] | null>(null);
+  const [related, setRelated] = useState<RelatedData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
 
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const list = await repo.listCustomers();
+      const productNames = new Map(
+        (await repo.listAgentProducts()).map((p) => [p.id, p.name] as const)
+      );
+      const subscriptions = new Map<string, Subscription[]>();
+      const entitlements = new Map<string, FeatureEntitlement[]>();
+      const licenses = new Map<string, AgentLicense[]>();
+      const prepaid = new Map<string, PrepaidSnapshot>();
+      const entries = await Promise.all(
+        list.map(async (c) => {
+          const [subs, ents, lic, prep] = await Promise.all([
+            repo.getSubscriptions(c.id),
+            repo.getFeatureEntitlements(c.id),
+            repo.getAgentLicenses(c.id),
+            repo.getPrepaidSnapshot(c.id, SEED_NOW),
+          ]);
+          return [c.id, subs, ents, lic, prep] as const;
+        })
+      );
+      for (const [id, subs, ents, lic, prep] of entries) {
+        subscriptions.set(id, subs);
+        entitlements.set(id, ents);
+        licenses.set(id, lic);
+        prepaid.set(id, prep);
+      }
+      setCustomers(list);
+      setRelated({ subscriptions, entitlements, licenses, prepaid, productNames });
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : "Could not load customers."
+      );
+    }
+  }, [repo]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   const filtered = useMemo(() => {
+    if (!customers) return [];
     const q = search.trim().toLowerCase();
     return customers
-      .filter((c) => (status === "all" ? true : c.status === status))
+      .filter((c) => {
+        // Archived customers leave the default working list (D-05).
+        if (status === "all") return c.status !== "archived";
+        return c.status === status;
+      })
       .filter((c) =>
         q.length === 0
           ? true
           : c.name.toLowerCase().includes(q) ||
-          c.domain.toLowerCase().includes(q) ||
-          c.contact.toLowerCase().includes(q)
+            c.domain.toLowerCase().includes(q) ||
+            c.contact.toLowerCase().includes(q)
       )
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [customers, search, status]);
@@ -80,32 +127,14 @@ export function CustomersPage() {
       active: 0,
       paused: 0,
       churned: 0,
+      archived: 0,
     };
-    for (const c of customers) counts[c.status]++;
+    for (const c of customers ?? []) counts[c.status]++;
     return counts;
   }, [customers]);
 
-  // Per-customer related records (subscriptions, entitlements, licenses,
-  // prepaid token accounts) plus the agent product catalog, so the table
-  // columns can render without re-querying the repository for every row.
-  const related = useMemo(() => {
-    const subscriptions = new Map<string, Subscription[]>();
-    const entitlements = new Map<string, FeatureEntitlement[]>();
-    const licenses = new Map<string, AgentLicense[]>();
-    const prepaid = new Map<string, PrepaidSnapshot>();
-    const productNames = new Map(
-      repo.listAgentProducts().map((p) => [p.id, p.name] as const)
-    );
-    for (const c of customers) {
-      subscriptions.set(c.id, repo.getSubscriptions(c.id));
-      entitlements.set(c.id, repo.getFeatureEntitlements(c.id));
-      licenses.set(c.id, repo.getAgentLicenses(c.id));
-      prepaid.set(c.id, repo.getPrepaidSnapshot(c.id, SEED_NOW));
-    }
-    return { subscriptions, entitlements, licenses, productNames, prepaid };
-  }, [repo, customers]);
-
   const columns: DataTableColumn<Customer>[] = useMemo(() => {
+    if (!related) return [];
     const activeSubs = (c: Customer) =>
       (related.subscriptions.get(c.id) ?? []).filter(
         (s) => s.status === "active" || s.status === "trialing"
@@ -282,16 +311,70 @@ export function CustomersPage() {
             >
               Edit
             </a>
-            <DeleteCustomerAction
+            <ArchiveCustomerDialog
               customer={c}
               repository={repo}
-              onDeleted={() => setCustomers(repo.listCustomers())}
+              onArchived={() => void load()}
             />
           </div>
         ),
       },
     ];
-  }, [related, repo]);
+  }, [related, repo, load]);
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          title="Customers"
+          description="Accounts onboarded to Hivarium, their lifecycle state, key contacts and subscription footprint."
+          id="customers-page-title"
+        />
+        <div
+          className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-center"
+          data-testid="customers-error"
+        >
+          <h2 className="text-lg font-semibold">Unable to load customers</h2>
+          <p className="text-muted-foreground max-w-sm text-sm">{loadError}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            data-testid="retry-customers"
+          >
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!customers || !related) {
+    return (
+      <div className="flex flex-col gap-6" data-testid="customers-loading">
+        <PageHeader
+          title="Customers"
+          description="Accounts onboarded to Hivarium, their lifecycle state, key contacts and subscription footprint."
+          id="customers-page-title"
+        />
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div
+              key={index}
+              className="border-border flex items-center gap-3 rounded-xl border bg-card p-4"
+            >
+              <Skeleton className="size-9 rounded-full" />
+              <div className="flex flex-1 flex-col gap-2">
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="h-3 w-1/4" />
+              </div>
+              <Skeleton className="h-6 w-24 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -312,7 +395,7 @@ export function CustomersPage() {
         total={customers.length}
         active={statusCounts.active}
         evaluation={statusCounts.evaluation}
-        archived={statusCounts.churned}
+        archived={statusCounts.archived}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -328,7 +411,7 @@ export function CustomersPage() {
           />
         </div>
         <div className="flex items-center gap-2" role="radiogroup" aria-label="Filter by status">
-          {(["all", "active", "evaluation", "paused", "churned"] as const).map((s) => (
+          {(["all", "active", "evaluation", "paused", "churned", "archived"] as const).map((s) => (
             <StatusPill
               key={s}
               selected={status === s}
@@ -349,72 +432,22 @@ export function CustomersPage() {
         pageSize={8}
         emptyMessage={
           search || status !== "all"
-            ? "No customers match the current filters."
+            ? status === "archived"
+              ? "No archived customers."
+              : "No customers match the current filters."
             : "No customers yet."
         }
       />
 
-      <ResetData />
+      <ResetData onReset={() => void load()} />
     </div>
-  );
-}
-
-function DeleteCustomerAction({
-  customer,
-  repository,
-  onDeleted,
-}: {
-  customer: Customer;
-  repository: HiveRepository;
-  onDeleted: () => void;
-}) {
-  const handleDelete = () => {
-    repository.deleteCustomer(customer.id);
-    onDeleted();
-    toast.success("Customer deleted", {
-      description: `${customer.name} and its related local records were removed.`,
-    });
-  };
-
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <button
-          type="button"
-          onClick={(event) => event.stopPropagation()}
-          className="text-destructive text-sm hover:underline"
-          data-testid={`delete-${customer.id}`}
-        >
-          Delete
-        </button>
-      </AlertDialogTrigger>
-      <AlertDialogContent data-testid="delete-customer-dialog">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {customer.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This permanently removes the customer and its local subscriptions,
-            feature entitlements, and agent licenses. This action cannot be
-            undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={handleDelete}
-            className="bg-destructive text-white hover:bg-destructive/90"
-            data-testid={`confirm-delete-${customer.id}`}
-          >
-            Delete customer
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 
 /**
  * Compact summary strip replacing the previous row of large stat cards.
  * Purely presentational — the status pills below the strip drive filtering.
+ * The Archived count reflects the archived lifecycle status, not churned.
  */
 function SummaryStrip({
   total,
@@ -492,18 +525,18 @@ function StatusPill({
   );
 }
 
-function ResetData() {
+function ResetData({ onReset }: { onReset: () => void }) {
   const [confirmed, setConfirmed] = useState(false);
   const [lastReset, setLastReset] = useState<string | null>(null);
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (!confirmed) {
       setConfirmed(true);
       window.setTimeout(() => setConfirmed(false), 4000);
       return;
     }
     const seeded = createInMemoryRepository();
-    seeded.repository.reset();
+    await seeded.repository.reset();
     const fresh = buildSeedStore();
     try {
       if (typeof localStorage !== "undefined") {
@@ -515,9 +548,10 @@ function ResetData() {
     } catch {
       /* localStorage unavailable – reset still works in-memory */
     }
-    // Force the table to re-read by triggering a re-render via state.
+    // Force the table to re-read by re-running the repository read.
     setLastReset(new Date().toISOString());
     setConfirmed(false);
+    onReset();
   };
 
   return (
@@ -532,7 +566,7 @@ function ResetData() {
       <Button
         variant="ghost"
         size="sm"
-        onClick={handleReset}
+        onClick={() => void handleReset()}
         data-testid="reset-data-button"
         className={cn(
           "text-muted-foreground hover:text-destructive",

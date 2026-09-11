@@ -28,8 +28,12 @@ afterEach(() => {
   toast.dismiss();
 });
 
-/** Renders the page inside a memory router + repo provider + toast surface. */
-function renderProfilePath(
+/**
+ * Renders the page inside a memory router + repo provider + toast surface and
+ * waits for the async profile read to finish (the loading skeleton disappears)
+ * so callers can query the loaded content immediately.
+ */
+async function renderProfilePath(
   path: string,
   repository = createInMemoryRepository().repository
 ) {
@@ -41,12 +45,16 @@ function renderProfilePath(
     ],
     { initialEntries: [url.pathname] }
   );
-  return render(
+  const result = render(
     <RepositoryProvider repository={repository}>
       <RouterProvider router={router} />
       <Toaster position="bottom-right" />
     </RepositoryProvider>
   );
+  await waitFor(() =>
+    expect(screen.queryByTestId("profile-loading")).not.toBeInTheDocument()
+  );
+  return result;
 }
 
 /** Opens the commercial drawer from the Overview primary action. */
@@ -102,8 +110,8 @@ describe("CustomerProfilePage", () => {
   // Tabs
   // -------------------------------------------------------------------------
 
-  it("renders exactly four tabs with the approved labels", () => {
-    renderProfilePath("/customers/cust_northwind");
+  it("renders exactly four tabs with the approved labels", async () => {
+    await renderProfilePath("/customers/cust_northwind");
     const tabs = screen.getAllByRole("tab");
     expect(tabs).toHaveLength(4);
     expect(tabs.map((tab) => tab.textContent)).toEqual([
@@ -114,8 +122,8 @@ describe("CustomerProfilePage", () => {
     ]);
   });
 
-  it("links each tab trigger to its tabpanel", () => {
-    renderProfilePath("/customers/cust_northwind");
+  it("links each tab trigger to its tabpanel", async () => {
+    await renderProfilePath("/customers/cust_northwind");
     const overviewTab = screen.getByRole("tab", { name: "Overview" });
     const overviewPanel = screen.getByRole("tabpanel", { name: "Overview" });
     expect(overviewTab).toHaveAttribute("aria-controls", overviewPanel.id);
@@ -124,7 +132,7 @@ describe("CustomerProfilePage", () => {
 
   it("supports arrow-key navigation between tabs", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_northwind");
+    await renderProfilePath("/customers/cust_northwind");
     screen.getByRole("tab", { name: "Overview" }).focus();
 
     await user.keyboard("{ArrowRight}");
@@ -142,7 +150,7 @@ describe("CustomerProfilePage", () => {
 
   it("supports Home and End keyboard navigation", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_northwind");
+    await renderProfilePath("/customers/cust_northwind");
     screen.getByRole("tab", { name: "Agent Access" }).focus();
 
     await user.keyboard("{Home}");
@@ -155,8 +163,8 @@ describe("CustomerProfilePage", () => {
   // Overview tab
   // -------------------------------------------------------------------------
 
-  it("shows lifecycle, active model, value, important date, agent count and primary action", () => {
-    renderProfilePath("/customers/cust_northwind");
+  it("shows lifecycle, active model, value, important date, agent count and primary action", async () => {
+    await renderProfilePath("/customers/cust_northwind");
     const band = screen.getByTestId("overview-summary-band");
     expect(band).toHaveTextContent("Active");
     expect(band).toHaveTextContent("Monthly");
@@ -168,8 +176,8 @@ describe("CustomerProfilePage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows Set commercial model when no arrangement exists", () => {
-    renderProfilePath("/customers/cust_greyharbor");
+  it("shows Set commercial model when no arrangement exists", async () => {
+    await renderProfilePath("/customers/cust_greyharbor");
     const band = screen.getByTestId("overview-summary-band");
     expect(band).toHaveTextContent("No commercial model");
     expect(
@@ -177,16 +185,16 @@ describe("CustomerProfilePage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the scheduled change date when a successor is scheduled", () => {
-    renderProfilePath("/customers/cust_meridians");
+  it("shows the scheduled change date when a successor is scheduled", async () => {
+    await renderProfilePath("/customers/cust_meridians");
     const band = screen.getByTestId("overview-summary-band");
     expect(band).toHaveTextContent("Prepaid");
     expect(band).toHaveTextContent("250,000 tokens");
     expect(band).toHaveTextContent(/Scheduled change (Dec 1|Nov 30), 2026/);
   });
 
-  it("shows contact details, notes and feature entitlements with expiry bounds", () => {
-    renderProfilePath("/customers/cust_bluepeak");
+  it("shows contact details, notes and feature entitlements with expiry bounds", async () => {
+    await renderProfilePath("/customers/cust_bluepeak");
     const panel = screen.getByTestId("panel-overview");
     expect(panel).toHaveTextContent("Marcus Oyelaran");
     expect(panel).toHaveTextContent("marcus.oyelaran@bluepeak.example");
@@ -198,8 +206,8 @@ describe("CustomerProfilePage", () => {
     expect(panel).toHaveTextContent("No expiry");
   });
 
-  it("uses singular grammar for one active agent", () => {
-    renderProfilePath("/customers/cust_meridians");
+  it("uses singular grammar for one active agent", async () => {
+    await renderProfilePath("/customers/cust_meridians");
     const band = screen.getByTestId("overview-summary-band");
     expect(band).toHaveTextContent("Active agent");
     expect(band).not.toHaveTextContent("Active agents");
@@ -211,7 +219,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the active monthly arrangement terms", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_northwind");
+    await renderProfilePath("/customers/cust_northwind");
     await user.click(screen.getByTestId("tab-commercial"));
     const card = screen.getByTestId("active-arrangement");
     expect(card).toHaveTextContent("Monthly");
@@ -222,7 +230,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the active prepaid arrangement terms", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-commercial"));
     const card = screen.getByTestId("active-arrangement");
     expect(card).toHaveTextContent("Prepaid");
@@ -235,7 +243,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the scheduled change strip with Review action", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-commercial"));
     const strip = screen.getByTestId("scheduled-change");
     expect(strip).toHaveTextContent("Scheduled change");
@@ -246,7 +254,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows arrangement history newest first", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await user.click(screen.getByTestId("tab-commercial"));
     const panel = screen.getByTestId("panel-commercial");
     const rows = within(panel).getAllByRole("row");
@@ -259,7 +267,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the exact empty state when no commercial model is active", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await user.click(screen.getByTestId("tab-commercial"));
     const panel = screen.getByTestId("panel-commercial");
     expect(panel).toHaveTextContent("No commercial model is active");
@@ -271,7 +279,7 @@ describe("CustomerProfilePage", () => {
   it("shows Not recorded for absent annual renewal posture", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    repository.saveCommercialArrangement(
+    await repository.saveCommercialArrangement(
       {
         id: "arr_test_annual",
         customerId: "cust_greyharbor",
@@ -291,7 +299,7 @@ describe("CustomerProfilePage", () => {
       },
       "2026-01-01T00:00:00.000Z"
     );
-    renderProfilePath("/customers/cust_greyharbor", repository);
+    await renderProfilePath("/customers/cust_greyharbor", repository);
     await user.click(screen.getByTestId("tab-commercial"));
     const card = screen.getByTestId("active-arrangement");
     expect(card).toHaveTextContent("Not recorded");
@@ -299,7 +307,7 @@ describe("CustomerProfilePage", () => {
 
   it("opens a read-only record dialog from history", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await user.click(screen.getByTestId("tab-commercial"));
     await user.click(screen.getByTestId("view-record-arr_greyharbor_annual"));
     const dialog = screen.getByTestId("arrangement-record-dialog");
@@ -315,7 +323,7 @@ describe("CustomerProfilePage", () => {
 
   it("opens the commercial drawer from the Overview primary action", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await openCommercialSheet(user);
     expect(
       screen.getByRole("heading", { name: "Set commercial model" })
@@ -325,7 +333,7 @@ describe("CustomerProfilePage", () => {
   it("creates a monthly arrangement through the drawer", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_greyharbor", repository);
+    await renderProfilePath("/customers/cust_greyharbor", repository);
 
     await openCommercialSheet(user);
     await user.type(screen.getByTestId("monthly-amount"), "199");
@@ -343,7 +351,7 @@ describe("CustomerProfilePage", () => {
       await screen.findByText("Commercial model started")
     ).toBeInTheDocument();
 
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_greyharbor",
       SEED_NOW
     );
@@ -356,7 +364,7 @@ describe("CustomerProfilePage", () => {
   it("creates a prepaid arrangement through the drawer", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_greyharbor", repository);
+    await renderProfilePath("/customers/cust_greyharbor", repository);
 
     await openCommercialSheet(user);
     await user.click(screen.getByLabelText(/Prepaid/));
@@ -370,7 +378,7 @@ describe("CustomerProfilePage", () => {
       expect(screen.queryByTestId("commercial-sheet")).not.toBeInTheDocument()
     );
 
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_greyharbor",
       SEED_NOW
     );
@@ -383,7 +391,7 @@ describe("CustomerProfilePage", () => {
   it("creates an annual arrangement through the drawer", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_greyharbor", repository);
+    await renderProfilePath("/customers/cust_greyharbor", repository);
 
     await openCommercialSheet(user);
     await user.click(screen.getByLabelText(/Annual contract/));
@@ -402,7 +410,7 @@ describe("CustomerProfilePage", () => {
       expect(screen.queryByTestId("commercial-sheet")).not.toBeInTheDocument()
     );
 
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_greyharbor",
       SEED_NOW
     );
@@ -418,7 +426,7 @@ describe("CustomerProfilePage", () => {
   it("schedules a commercial change and keeps the current arrangement active", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_northwind", repository);
+    await renderProfilePath("/customers/cust_northwind", repository);
 
     await openCommercialSheet(user);
     fireEvent.click(screen.getByLabelText("Schedule for date"));
@@ -441,7 +449,7 @@ describe("CustomerProfilePage", () => {
       await screen.findByText("Commercial model scheduled")
     ).toBeInTheDocument();
 
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_northwind",
       SEED_NOW
     );
@@ -455,7 +463,7 @@ describe("CustomerProfilePage", () => {
 
   it("discloses that the current arrangement will move to history", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_northwind");
+    await renderProfilePath("/customers/cust_northwind");
     await openCommercialSheet(user);
     expect(
       screen.getByText(/The current Monthly arrangement will move to history/)
@@ -464,7 +472,7 @@ describe("CustomerProfilePage", () => {
 
   it("opens the drawer in review mode from the scheduled change strip", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-commercial"));
     await user.click(screen.getByTestId("review-scheduled-change"));
     expect(await screen.findByTestId("commercial-sheet")).toBeVisible();
@@ -479,7 +487,7 @@ describe("CustomerProfilePage", () => {
 
   it("blocks negative money inline", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await openCommercialSheet(user);
     fireEvent.change(screen.getByTestId("monthly-amount"), {
       target: { value: "-5" },
@@ -495,7 +503,7 @@ describe("CustomerProfilePage", () => {
 
   it("blocks missing required fields inline", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await openCommercialSheet(user);
     await user.click(screen.getByTestId("submit-commercial-arrangement"));
     expect(
@@ -515,7 +523,7 @@ describe("CustomerProfilePage", () => {
     failing.saveCommercialArrangement = () => {
       throw new Error("boom");
     };
-    renderProfilePath("/customers/cust_greyharbor", failing);
+    await renderProfilePath("/customers/cust_greyharbor", failing);
 
     await openCommercialSheet(user);
     await user.type(screen.getByTestId("monthly-amount"), "199");
@@ -524,9 +532,7 @@ describe("CustomerProfilePage", () => {
     await user.click(screen.getByTestId("submit-commercial-arrangement"));
 
     expect(
-      await screen.findByText(
-        "Commercial changes were not saved. Review the highlighted fields and try again."
-      )
+      await screen.findByText("boom")
     ).toBeInTheDocument();
     expect(screen.getByTestId("commercial-sheet")).toBeInTheDocument();
     expect(screen.getByTestId("monthly-amount")).toHaveValue(199);
@@ -534,7 +540,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the pending verb and disables the submit button while committing", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await openCommercialSheet(user);
     await user.type(screen.getByTestId("monthly-amount"), "199");
     await user.type(screen.getByTestId("renews-at"), "2027-01-01");
@@ -550,7 +556,7 @@ describe("CustomerProfilePage", () => {
 
   it("asks to discard dirty commercial changes before closing", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await openCommercialSheet(user);
     const reasonInput = screen.getByTestId("arrangement-reason");
     fireEvent.input(reasonInput, { target: { value: 'Something' } });
@@ -578,7 +584,7 @@ describe("CustomerProfilePage", () => {
   it("terminates the arrangement with the exact confirmation copy and revokes grants", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_northwind", repository);
+    await renderProfilePath("/customers/cust_northwind", repository);
 
     await user.click(screen.getByTestId("tab-commercial"));
     await user.click(screen.getByTestId("terminate-arrangement"));
@@ -601,12 +607,12 @@ describe("CustomerProfilePage", () => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     );
 
-    const snapshot = repository.getCommercialSnapshot(
+    const snapshot = await repository.getCommercialSnapshot(
       "cust_northwind",
       SEED_NOW
     );
     expect(snapshot.history.some(a => a.reason === "Closeout")).toBe(true);
-    const access = repository.getAgentAccessSnapshot(
+    const access = await repository.getAgentAccessSnapshot(
       "cust_northwind",
       SEED_NOW
     );
@@ -617,7 +623,7 @@ describe("CustomerProfilePage", () => {
   it("uses singular grammar for one active grant in the termination confirmation", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    repository.grantAgentAccess(
+    await repository.grantAgentAccess(
       {
         customerId: "cust_sablefin",
         agentProductId: "agent_courier",
@@ -628,7 +634,7 @@ describe("CustomerProfilePage", () => {
       },
       "2026-08-01T00:00:00.000Z"
     );
-    renderProfilePath("/customers/cust_sablefin", repository);
+    await renderProfilePath("/customers/cust_sablefin", repository);
 
     await user.click(screen.getByTestId("tab-commercial"));
     await user.click(screen.getByTestId("terminate-arrangement"));
@@ -645,7 +651,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows current grants with revoke controls", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_northwind");
+    await renderProfilePath("/customers/cust_northwind");
     await user.click(screen.getByTestId("tab-agent-access"));
     const panel = screen.getByTestId("panel-agent-access");
     expect(panel).toHaveTextContent("Courier");
@@ -659,7 +665,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows scheduled access separately", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-agent-access"));
     const panel = screen.getByTestId("panel-agent-access");
     expect(panel).toHaveTextContent(/Revocation scheduled (Oct 1|Sep 30), 2026/);
@@ -667,7 +673,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows access history", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await user.click(screen.getByTestId("tab-agent-access"));
     const panel = screen.getByTestId("panel-agent-access");
     expect(panel).toHaveTextContent("Access history");
@@ -676,7 +682,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the exact empty state when no current access exists", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await user.click(screen.getByTestId("tab-agent-access"));
     const panel = screen.getByTestId("panel-agent-access");
     expect(panel).toHaveTextContent("No agents are available to this customer");
@@ -692,7 +698,7 @@ describe("CustomerProfilePage", () => {
   it("grants agent access immediately through the drawer", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_sablefin", repository);
+    await renderProfilePath("/customers/cust_sablefin", repository);
 
     await openAccessSheet(user);
     await user.click(screen.getByTestId("agent-option-agent_sentinel"));
@@ -704,7 +710,7 @@ describe("CustomerProfilePage", () => {
     );
     expect(await screen.findByText("Agent access granted")).toBeInTheDocument();
 
-    const snapshot = repository.getAgentAccessSnapshot(
+    const snapshot = await repository.getAgentAccessSnapshot(
       "cust_sablefin",
       SEED_NOW
     );
@@ -716,7 +722,7 @@ describe("CustomerProfilePage", () => {
   it("schedules agent access through the drawer", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_sablefin", repository);
+    await renderProfilePath("/customers/cust_sablefin", repository);
 
     await openAccessSheet(user);
     await user.click(screen.getByTestId("agent-option-agent_courier"));
@@ -732,7 +738,7 @@ describe("CustomerProfilePage", () => {
       await screen.findByText("Agent access scheduled")
     ).toBeInTheDocument();
 
-    const snapshot = repository.getAgentAccessSnapshot(
+    const snapshot = await repository.getAgentAccessSnapshot(
       "cust_sablefin",
       SEED_NOW
     );
@@ -743,7 +749,7 @@ describe("CustomerProfilePage", () => {
 
   it("disables agents the customer already has access to", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_northwind");
+    await renderProfilePath("/customers/cust_northwind");
     await openAccessSheet(user);
     const courierOption = screen.getByTestId("agent-option-agent_courier");
     expect(courierOption).toBeDisabled();
@@ -754,7 +760,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the no-matching-agents empty state", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_sablefin");
+    await renderProfilePath("/customers/cust_sablefin");
     await openAccessSheet(user);
     await user.type(screen.getByTestId("agent-search"), "zzzz");
     expect(
@@ -772,7 +778,7 @@ describe("CustomerProfilePage", () => {
     failing.grantAgentAccess = () => {
       throw new Error("boom");
     };
-    renderProfilePath("/customers/cust_sablefin", failing);
+    await renderProfilePath("/customers/cust_sablefin", failing);
 
     await openAccessSheet(user);
     await user.click(screen.getByTestId("agent-option-agent_sentinel"));
@@ -780,16 +786,14 @@ describe("CustomerProfilePage", () => {
     await user.click(screen.getByTestId("submit-agent-access"));
 
     expect(
-      await screen.findByText(
-        "Agent access was not changed. Review the dates and try again."
-      )
+      await screen.findByText("boom")
     ).toBeInTheDocument();
     expect(screen.getByTestId("access-sheet")).toBeInTheDocument();
   });
 
   it("asks to discard dirty access changes before closing", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_sablefin");
+    await renderProfilePath("/customers/cust_sablefin");
     await openAccessSheet(user);
     await user.click(screen.getByTestId("agent-option-agent_sentinel"));
     const reasonInput = screen.getByTestId("access-reason");
@@ -817,7 +821,7 @@ describe("CustomerProfilePage", () => {
   it("revokes access immediately with the exact confirmation copy", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_northwind", repository);
+    await renderProfilePath("/customers/cust_northwind", repository);
 
     await user.click(screen.getByTestId("tab-agent-access"));
     const row = screen.getByTestId("grant-grant_lic_northwind_courier");
@@ -839,7 +843,7 @@ describe("CustomerProfilePage", () => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     );
 
-    const access = repository.getAgentAccessSnapshot(
+    const access = await repository.getAgentAccessSnapshot(
       "cust_northwind",
       SEED_NOW
     );
@@ -854,7 +858,7 @@ describe("CustomerProfilePage", () => {
   it("schedules a revocation", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_northwind", repository);
+    await renderProfilePath("/customers/cust_northwind", repository);
 
     await user.click(screen.getByTestId("tab-agent-access"));
     const row = screen.getByTestId("grant-grant_lic_northwind_courier");
@@ -871,9 +875,8 @@ describe("CustomerProfilePage", () => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     );
 
-    const grant = repository
-      .listAgentAccessGrants("cust_northwind")
-      .find((g) => g.agentProductId === "agent_courier");
+    const grants = await repository.listAgentAccessGrants("cust_northwind");
+    const grant = grants.find((g) => g.agentProductId === "agent_courier");
     expect(grant?.scheduledRevokeAt).toBe("2026-12-01T00:00:00.000Z");
   });
 
@@ -883,7 +886,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the activity timeline newest first", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await user.click(screen.getByTestId("tab-activity"));
     const panel = screen.getByTestId("panel-activity");
     const items = within(panel).getAllByRole("listitem");
@@ -895,7 +898,7 @@ describe("CustomerProfilePage", () => {
 
   it("links automatic revocations to their commercial cause", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_greyharbor");
+    await renderProfilePath("/customers/cust_greyharbor");
     await user.click(screen.getByTestId("tab-activity"));
     const cause = screen.getByTestId(
       "activity-cause-evt_grant_greyharbor_sentinel_revoked"
@@ -909,7 +912,7 @@ describe("CustomerProfilePage", () => {
   it("shows the exact empty state when no activity exists", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    repository.createCustomer({
+    await repository.createCustomer({
       id: "cust_empty",
       name: "Empty Co",
       domain: "empty.example",
@@ -918,7 +921,7 @@ describe("CustomerProfilePage", () => {
       status: "active",
       notes: "",
     });
-    renderProfilePath("/customers/cust_empty", repository);
+    await renderProfilePath("/customers/cust_empty", repository);
     await user.click(screen.getByTestId("tab-activity"));
     expect(screen.getByText("No activity recorded")).toBeInTheDocument();
     expect(
@@ -932,7 +935,7 @@ describe("CustomerProfilePage", () => {
 
   it("renders the token account statement newest first with full-account balances", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-activity"));
 
     // The statement is the first section of the Activity tab, above the
@@ -991,7 +994,7 @@ describe("CustomerProfilePage", () => {
 
   it("combines date, agent, and transaction-type filters", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-activity"));
 
     await user.type(screen.getByTestId("statement-from"), "2026-05-01");
@@ -1027,7 +1030,7 @@ describe("CustomerProfilePage", () => {
 
   it("keeps rows on both inclusive date boundaries", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-activity"));
 
     await user.type(screen.getByTestId("statement-from"), "2026-06-20");
@@ -1046,7 +1049,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the exact empty-filtered copy and keeps filters available", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-activity"));
 
     await user.type(screen.getByTestId("statement-from"), "2026-01-01");
@@ -1072,7 +1075,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows per-agent totals ordered highest consumption first", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-activity"));
 
     expect(screen.getByTestId("statement-net-consumed")).toHaveTextContent(
@@ -1087,7 +1090,7 @@ describe("CustomerProfilePage", () => {
 
   it("nets a reversed usage debit to zero in the selected period", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await user.click(screen.getByTestId("tab-activity"));
 
     await user.type(screen.getByTestId("statement-from"), "2026-06-20");
@@ -1108,7 +1111,7 @@ describe("CustomerProfilePage", () => {
   it("shows the exact empty-account copy for a historical prepaid account", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    repository.createCustomer({
+    await repository.createCustomer({
       id: "cust_prepaid_hist",
       name: "Prepaid History Co",
       domain: "prepaid-hist.example",
@@ -1117,7 +1120,7 @@ describe("CustomerProfilePage", () => {
       status: "active",
       notes: "",
     });
-    repository.saveCommercialArrangement(
+    await repository.saveCommercialArrangement(
       {
         id: "arr_prepaid_hist",
         customerId: "cust_prepaid_hist",
@@ -1132,7 +1135,7 @@ describe("CustomerProfilePage", () => {
       },
       "2025-01-01T00:00:00.000Z"
     );
-    repository.terminateCommercialArrangement(
+    await repository.terminateCommercialArrangement(
       {
         arrangementId: "arr_prepaid_hist",
         customerId: "cust_prepaid_hist",
@@ -1140,7 +1143,7 @@ describe("CustomerProfilePage", () => {
       },
       "2025-06-01T00:00:00.000Z"
     );
-    renderProfilePath("/customers/cust_prepaid_hist", repository);
+    await renderProfilePath("/customers/cust_prepaid_hist", repository);
     await user.click(screen.getByTestId("tab-activity"));
 
     const empty = screen.getByTestId("statement-empty");
@@ -1160,7 +1163,7 @@ describe("CustomerProfilePage", () => {
 
   it("opens the Record usage sheet from the Activity tab with customer and balance", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     const sheet = await openUsageSheet(user);
     expect(sheet).toHaveTextContent("Record usage");
     expect(sheet).toHaveTextContent("Meridians Health");
@@ -1170,7 +1173,7 @@ describe("CustomerProfilePage", () => {
 
   it("lists only catalog agents the customer may currently use", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await openUsageSheet(user);
     await user.click(screen.getByTestId("usage-agent-trigger"));
     expect(
@@ -1186,7 +1189,7 @@ describe("CustomerProfilePage", () => {
 
   it("keeps Review usage disabled until every required field is valid", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await openUsageSheet(user);
     const review = screen.getByTestId("review-usage");
     expect(review).toBeDisabled();
@@ -1209,7 +1212,7 @@ describe("CustomerProfilePage", () => {
 
   it("shows the projected resulting balance live", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await openUsageSheet(user);
     const resulting = screen.getByTestId("usage-resulting-balance");
     expect(resulting).toHaveTextContent("250,000 tokens");
@@ -1220,7 +1223,7 @@ describe("CustomerProfilePage", () => {
   it("records usage through the named-customer confirmation with exact copy", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openUsageSheet(user);
     await chooseUsageAgent(user);
@@ -1246,13 +1249,13 @@ describe("CustomerProfilePage", () => {
     expect(
       screen.getByText("1,200 tokens were deducted for Sentinel.")
     ).toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(248800);
   });
 
   it("announces an exact replay with no additional deduction", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openUsageSheet(user);
     await chooseUsageAgent(user);
@@ -1264,7 +1267,7 @@ describe("CustomerProfilePage", () => {
     await user.click(screen.getByTestId("review-usage"));
     await user.click(screen.getByTestId("confirm-record-usage"));
     expect(await screen.findByText("Usage recorded")).toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(248800);
 
     // Re-submit the identical source reference with identical values.
     await openUsageSheet(user);
@@ -1281,13 +1284,13 @@ describe("CustomerProfilePage", () => {
     expect(
       screen.getByText("No additional tokens were deducted.")
     ).toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(248800);
   });
 
   it("preserves the form and shows the conflict message on conflicting reuse", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openUsageSheet(user);
     await chooseUsageAgent(user);
@@ -1318,13 +1321,13 @@ describe("CustomerProfilePage", () => {
     expect(screen.getByTestId("usage-source-reference")).toHaveValue(
       "usage_conflict_001"
     );
-    expect(repository.getTokenBalance("cust_meridians")).toBe(249900);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(249900);
   });
 
   it("blocks usage that would exceed the balance before the confirmation", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openUsageSheet(user);
     await chooseUsageAgent(user);
@@ -1339,12 +1342,12 @@ describe("CustomerProfilePage", () => {
       "Usage was not recorded. Meridians Health has 250,000 tokens available, but this debit requires 300,000 tokens."
     );
     expect(screen.queryByTestId("usage-confirmation")).not.toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(250000);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(250000);
   });
 
   it("asks to discard a dirty usage draft before closing", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await openUsageSheet(user);
     await user.type(screen.getByTestId("usage-tokens"), "100");
     await user.click(screen.getByRole("button", { name: "Close" }));
@@ -1369,7 +1372,7 @@ describe("CustomerProfilePage", () => {
 
   it("opens the Adjust balance sheet from the Commercial tab", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     const sheet = await openAdjustmentSheet(user);
     expect(sheet).toHaveTextContent("Adjust balance");
     expect(sheet).toHaveTextContent("Meridians Health");
@@ -1380,7 +1383,7 @@ describe("CustomerProfilePage", () => {
   it("applies a positive adjustment through the named-customer confirmation", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openAdjustmentSheet(user);
     await user.type(screen.getByTestId("adjustment-amount"), "500");
@@ -1399,13 +1402,13 @@ describe("CustomerProfilePage", () => {
     expect(
       await screen.findByText("Balance adjustment recorded")
     ).toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(250500);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(250500);
   });
 
   it("applies a negative adjustment through the named-customer confirmation", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openAdjustmentSheet(user);
     await user.click(screen.getByLabelText("Remove tokens"));
@@ -1425,13 +1428,13 @@ describe("CustomerProfilePage", () => {
     expect(
       await screen.findByText("Balance adjustment recorded")
     ).toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(249500);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(249500);
   });
 
   it("blocks a negative-resulting adjustment before the confirmation", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openAdjustmentSheet(user);
     await user.click(screen.getByLabelText("Remove tokens"));
@@ -1444,12 +1447,12 @@ describe("CustomerProfilePage", () => {
       "Adjustment was not applied. Removing 300,000 tokens would exceed the available balance of 250,000 tokens."
     );
     expect(screen.queryByTestId("adjustment-confirmation")).not.toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(250000);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(250000);
   });
 
   it("keeps Review adjustment disabled until amount, reference, and reason are valid", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await openAdjustmentSheet(user);
     const review = screen.getByTestId("review-adjustment");
     expect(review).toBeDisabled();
@@ -1469,7 +1472,7 @@ describe("CustomerProfilePage", () => {
 
   it("asks to discard a dirty adjustment draft before closing", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await openAdjustmentSheet(user);
     await user.type(screen.getByTestId("adjustment-amount"), "100");
     await user.click(screen.getByRole("button", { name: "Close" }));
@@ -1494,7 +1497,7 @@ describe("CustomerProfilePage", () => {
 
   it("opens the Reverse transaction sheet showing the immutable original", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     const sheet = await openReversalSheet(user);
     expect(sheet).toHaveTextContent("Reverse transaction");
     const original = screen.getByTestId("reversal-original-transaction");
@@ -1507,7 +1510,7 @@ describe("CustomerProfilePage", () => {
   it("reverses the target through the named-customer confirmation with exact copy", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openReversalSheet(user);
     await user.type(screen.getByTestId("reversal-reference"), "rev_test_001");
@@ -1530,13 +1533,13 @@ describe("CustomerProfilePage", () => {
 
     await user.click(screen.getByTestId("confirm-reverse-transaction"));
     expect(await screen.findByText("Transaction reversed")).toBeInTheDocument();
-    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(0);
   });
 
   it("blocks a second reversal of the same target with the precise reason", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    renderProfilePath("/customers/cust_meridians", repository);
+    await renderProfilePath("/customers/cust_meridians", repository);
 
     await openReversalSheet(user);
     await user.type(screen.getByTestId("reversal-reference"), "rev_first_001");
@@ -1548,14 +1551,15 @@ describe("CustomerProfilePage", () => {
     // The reversed original row now shows a neutral Reversed badge and no
     // reverse action, so the second attempt is exercised through the sheet
     // directly against the already-reversed target.
-    const customer = repository.getCustomer("cust_meridians");
-    const openingCredit = repository
-      .listLedgerTransactions("cust_meridians")
-      .find(
-        (transaction) =>
-          transaction.kind === "credit_grant" &&
-          transaction.reference === "opening_arr_meridians_prepaid"
-      );
+    const customer = await repository.getCustomer("cust_meridians");
+    const transactions = await repository.listLedgerTransactions(
+      "cust_meridians"
+    );
+    const openingCredit = transactions.find(
+      (transaction) =>
+        transaction.kind === "credit_grant" &&
+        transaction.reference === "opening_arr_meridians_prepaid"
+    );
     expect(customer).toBeDefined();
     expect(openingCredit).toBeDefined();
     render(
@@ -1580,13 +1584,13 @@ describe("CustomerProfilePage", () => {
     expect(await screen.findByTestId("reversal-blocked-message")).toHaveTextContent(
       "This transaction has already been reversed."
     );
-    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+    expect(await repository.getTokenBalance("cust_meridians")).toBe(0);
   });
 
   it("blocks a reversal-of-reversal with the precise reason", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    const reversal = repository.reverseTransaction(
+    const reversal = await repository.reverseTransaction(
       {
         customerId: "cust_meridians",
         transactionId: "txn_opening_arr_meridians_prepaid",
@@ -1595,7 +1599,7 @@ describe("CustomerProfilePage", () => {
       },
       SEED_NOW
     );
-    const customer = repository.getCustomer("cust_meridians");
+    const customer = await repository.getCustomer("cust_meridians");
     expect(customer).toBeDefined();
     render(
       <RepositoryProvider repository={repository}>
@@ -1624,10 +1628,13 @@ describe("CustomerProfilePage", () => {
   it("blocks a reversal that would make the balance negative", async () => {
     const user = userEvent.setup();
     const { repository } = createInMemoryRepository();
-    const customer = repository.getCustomer("cust_meridians");
-    const openingCredit = repository
-      .listLedgerTransactions("cust_meridians")
-      .find((transaction) => transaction.kind === "credit_grant");
+    const customer = await repository.getCustomer("cust_meridians");
+    const transactions = await repository.listLedgerTransactions(
+      "cust_meridians"
+    );
+    const openingCredit = transactions.find(
+      (transaction) => transaction.kind === "credit_grant"
+    );
     expect(customer).toBeDefined();
     expect(openingCredit).toBeDefined();
     render(
@@ -1656,7 +1663,7 @@ describe("CustomerProfilePage", () => {
 
   it("asks to discard a dirty reversal draft before closing", async () => {
     const user = userEvent.setup();
-    renderProfilePath("/customers/cust_meridians");
+    await renderProfilePath("/customers/cust_meridians");
     await openReversalSheet(user);
     await user.type(screen.getByTestId("reversal-reference"), "rev_dirty_001");
     await user.click(screen.getByRole("button", { name: "Close" }));
@@ -1679,17 +1686,17 @@ describe("CustomerProfilePage", () => {
   // Not found / long text / overflow
   // -------------------------------------------------------------------------
 
-  it("shows a not-found state for unknown ids", () => {
-    renderProfilePath("/customers/does_not_exist");
+  it("shows a not-found state for unknown ids", async () => {
+    await renderProfilePath("/customers/does_not_exist");
     expect(screen.queryByTestId("page-title")).not.toBeInTheDocument();
     expect(screen.getByText("Customer not found")).toBeInTheDocument();
   });
 
-  it("renders long customer names fully without page-level overflow", () => {
+  it("renders long customer names fully without page-level overflow", async () => {
     const { repository } = createInMemoryRepository();
     const longName =
       "A Very Long Customer Name That Keeps Going And Going And Going And Going And Going And Going";
-    repository.createCustomer({
+    await repository.createCustomer({
       id: "cust_long",
       name: longName,
       domain: "long.example",
@@ -1698,7 +1705,7 @@ describe("CustomerProfilePage", () => {
       status: "active",
       notes: "",
     });
-    renderProfilePath("/customers/cust_long", repository);
+    await renderProfilePath("/customers/cust_long", repository);
     expect(screen.getByTestId("page-title")).toHaveTextContent(longName);
   });
 
@@ -1734,7 +1741,7 @@ describe("CustomerProfilePage", () => {
     });
     storage.setItem(STORAGE_KEY, JSON.stringify(store));
 
-    renderProfilePath("/customers/cust_greyharbor", repository);
+    await renderProfilePath("/customers/cust_greyharbor", repository);
     await user.click(screen.getByTestId("tab-agent-access"));
     const row = screen.getByTestId("grant-grant_long");
     expect(row).toHaveTextContent(longName);

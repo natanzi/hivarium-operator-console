@@ -186,7 +186,7 @@ export function AgentAccessSheet({
         ? occurredAt
         : `${values.startsAt}T00:00:00.000Z`;
     try {
-      repo.grantAgentAccess(
+      await repo.grantAgentAccess(
         {
           id: `grant_${customer.id}_${values.agentProductId}_${occurredAt}_${grantSequence++}`,
           customerId: customer.id,
@@ -206,10 +206,12 @@ export function AgentAccessSheet({
       form.reset();
       onSaved();
       onOpenChange(false);
-    } catch {
-      toast.error(
-        "Agent access was not changed. Review the dates and try again."
-      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Agent access was not changed. Review the dates and try again.";
+      toast.error(message);
     }
   }
 
@@ -507,7 +509,7 @@ export function RevokeAccessDialog({
     const effectiveAt =
       effective === "now" ? occurredAt : `${revokeDate}T00:00:00.000Z`;
     try {
-      repo.revokeAgentAccess(
+      await repo.revokeAgentAccess(
         {
           grantId: grant.id,
           customerId: customer.id,
@@ -523,10 +525,12 @@ export function RevokeAccessDialog({
       );
       onRevoked();
       onOpenChange(false);
-    } catch {
-      toast.error(
-        "Agent access was not changed. Review the dates and try again."
-      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Agent access was not changed. Review the dates and try again.";
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }

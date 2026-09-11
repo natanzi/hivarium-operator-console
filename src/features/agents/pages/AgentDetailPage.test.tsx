@@ -30,9 +30,11 @@ function renderAgentDetail(
 }
 
 describe("AgentDetailPage", () => {
-  it("renders the agent identity and capability", () => {
+  it("renders the agent identity and capability", async () => {
     renderAgentDetail("/agents/agent_sentinel");
-    expect(screen.getByTestId("page-title").textContent).toBe("Sentinel");
+    expect((await screen.findByTestId("page-title")).textContent).toBe(
+      "Sentinel"
+    );
     expect(screen.getByTestId("page-title").parentElement?.textContent).toContain(
       "Security"
     );
@@ -45,9 +47,11 @@ describe("AgentDetailPage", () => {
     );
   });
 
-  it("lists customers with current access and links to their profiles", () => {
+  it("lists customers with current access and links to their profiles", async () => {
     renderAgentDetail("/agents/agent_sentinel");
-    const link = screen.getByTestId("agent-access-link-grant_meridians_sentinel");
+    const link = await screen.findByTestId(
+      "agent-access-link-grant_meridians_sentinel"
+    );
     expect(link).toHaveAttribute("href", "/customers/cust_meridians");
     expect(link.textContent).toBe("Meridians Health");
     const row = screen.getByTestId("agent-access-grant_meridians_sentinel");
@@ -57,16 +61,16 @@ describe("AgentDetailPage", () => {
     expect(row.textContent).toMatch(/Revocation scheduled (Oct 1|Sep 30), 2026/);
   });
 
-  it("shows the empty state when no customer has access", () => {
+  it("shows the empty state when no customer has access", async () => {
     renderAgentDetail("/agents/agent_vanguard");
     expect(
-      screen.getByTestId("agent-customer-access-empty")
+      await screen.findByTestId("agent-customer-access-empty")
     ).toBeInTheDocument();
   });
 
-  it("renders a not-found state for an unknown agent id", () => {
+  it("renders a not-found state for an unknown agent id", async () => {
     renderAgentDetail("/agents/agent_missing");
-    expect(screen.getByText("Agent not found")).toBeInTheDocument();
+    expect(await screen.findByText("Agent not found")).toBeInTheDocument();
     expect(screen.getByTestId("back-to-agents")).toHaveAttribute(
       "href",
       "/agents"

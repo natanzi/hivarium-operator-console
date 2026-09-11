@@ -39,7 +39,7 @@ const T3 = "2027-01-01T00:00:00.000Z";
 
 function makeStore(overrides: Partial<DataStore> = {}): DataStore {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     customers: [],
     featureEntitlements: [],
     agentProducts: [],
