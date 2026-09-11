@@ -7,7 +7,7 @@
 ## Phases
 
 - [x] **Phase 1: Customer Commercial Control** - Manage each customer's commercial arrangement and agent access from one coherent profile.
-- [ ] **Phase 2: Prepaid Credit and Usage Accounting** - Operate prepaid accounts through an explainable ledger and auditable usage statement.
+- [x] **Phase 2: Prepaid Credit and Usage Accounting** - Operate prepaid accounts through an explainable ledger and auditable usage statement.
 - [ ] **Phase 3: Production-Safe Customer Operations** - Preserve the completed workflows in durable, authorized, auditable storage.
 
 ## Phase Details
@@ -37,10 +37,11 @@
   3. Replaying a usage event with the same source reference does not debit the customer twice.
   4. Operator can filter usage by period, agent, and transaction type, then see period consumption and an agent-by-agent breakdown.
   5. A prepaid account below its configured threshold is clearly identifiable without a noisy analytics dashboard.
-**Plans**: 3/3 planned (02-01, 02-02, 02-03)
+**Plans**: 3/3 complete (02-01, 02-02, 02-03)
 - **02-01 — Ledger foundation and credit tracer**: Prove the Phase 2 accounting architecture end to end with one visible credit tracer: schema v3, an immutable token ledger, a derived balance, a deterministic opening-credit migration, and a confirmed Add token credit workflow with restrained low-balance visibility.
 - **02-02 — Usage and correction accounting**: Prove the Phase 2 usage and correction accounting end to end: atomic usage debits with source-reference idempotency and conflict detection, insufficient-credit rejection, manual adjustments, and single full reversals, all behind named-customer confirmations and integrated into the Activity experience.
 - **02-03 — Statement and investigation experience**: Prove the Phase 2 statement and investigation experience end to end: a chronological token account statement with full-account running balances, date/agent/type filters, selected-period consumption totals, and a compact per-agent breakdown, embedded at the top of the existing Activity tab, plus the full regression and desktop/mobile visual verification that closes the phase.
+**Verification**: `.planning/phases/02-prepaid-credit-and-usage-accounting/VERIFICATION.md`
 **UI hint:** yes
 
 ### Phase 3: Production-Safe Customer Operations
@@ -62,8 +63,8 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Customer Commercial Control | 3/3 | Complete | 2026-09-10 |
-| 2. Prepaid Credit and Usage Accounting | 3/3 planned | Planned | - |
-| 3. Production-Safe Customer Operations | 0/TBD | Not started | - |
+| 2. Prepaid Credit and Usage Accounting | 3/3 | Complete | 2026-09-11 |
+| 3. Production-Safe Customer Operations | 0/TBD | Planned | - |
 
 ## Coverage
 
