@@ -9,8 +9,12 @@
  */
 
 import type {
+  DataStore,
   LedgerTransaction,
   LedgerTransactionKind,
+  ManualAdjustmentTransaction,
+  ReversalTransaction,
+  UsageDebitTransaction,
   UsageRecord,
 } from "./types";
 
@@ -282,6 +286,36 @@ export function validateReversalTarget(
   }
 }
 
+/**
+ * Validate that a transaction may be reversed by a specific customer with a
+ * specific amount (D-05): the target must exist, belong to the same customer,
+ * not be a reversal itself, not already be referenced by an earlier reversal,
+ * and the reversal amount must be the exact negation of the target's amount.
+ * Throws a descriptive error otherwise.
+ */
+export function validateReversal(
+  transactions: readonly LedgerTransaction[],
+  targetId: string,
+  customerId: string,
+  amountTokens: number
+): void {
+  validateReversalTarget(transactions, targetId);
+  const target = transactions.find((transaction) => transaction.id === targetId);
+  if (!target) {
+    throw new Error(`Ledger transaction with id "${targetId}" does not exist.`);
+  }
+  if (target.customerId !== customerId) {
+    throw new Error(
+      `Ledger transaction "${targetId}" belongs to a different customer.`
+    );
+  }
+  if (amountTokens !== -target.amountTokens) {
+    throw new Error(
+      "reversal amountTokens must equal the negative of the target transaction amountTokens."
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Low-balance predicate
 // ---------------------------------------------------------------------------
@@ -352,9 +386,35 @@ export function usageDebitTransactionId(sourceReference: string): string {
   return `txn_usage_${sourceReference}`;
 }
 
+/**
+ * Stable ledger transaction id for a manual adjustment. Derived from the
+ * customer id and occurredAt so repeated operator actions at the same instant
+ * cannot silently collide.
+ */
+export function manualAdjustmentTransactionId(
+  customerId: string,
+  occurredAt: string
+): string {
+  return `txn_${customerId}_adjustment_${occurredAt}`;
+}
+
 // ---------------------------------------------------------------------------
 // Usage fingerprint normalization
 // ---------------------------------------------------------------------------
+
+/**
+ * The normalized idempotency fingerprint of a usage event (D-09): trimmed
+ * `customerId`, `agentProductId`, and `sourceReference`; canonical ISO
+ * `occurredAt`; positive integer `tokenQuantity`. `sourceReference` is trimmed
+ * but never case-folded.
+ */
+export interface NormalizedUsageFingerprint {
+  customerId: string;
+  agentProductId: string;
+  sourceReference: string;
+  occurredAt: string;
+  tokenQuantity: number;
+}
 
 /**
  * Normalize the idempotency fingerprint of a usage event (D-09): trim
@@ -368,13 +428,7 @@ export function normalizeUsageFingerprint(input: {
   sourceReference: unknown;
   occurredAt: unknown;
   tokenQuantity: unknown;
-}): {
-  customerId: string;
-  agentProductId: string;
-  sourceReference: string;
-  occurredAt: string;
-  tokenQuantity: number;
-} | null {
+}): NormalizedUsageFingerprint | null {
   const customerId =
     typeof input.customerId === "string" ? input.customerId.trim() : "";
   const agentProductId =
@@ -402,6 +456,30 @@ export function normalizeUsageFingerprint(input: {
     occurredAt: input.occurredAt as string,
     tokenQuantity: input.tokenQuantity as number,
   };
+}
+
+/**
+ * Decide whether a usage submission is an exact replay of an existing usage
+ * record (D-09, USGE-02). Returns `true` when every normalized fingerprint
+ * field matches the existing record; throws a descriptive conflict error
+ * naming the source reference when any field differs. Returns `false` when no
+ * existing record is supplied, so callers know a fresh write is required.
+ */
+export function validateUsageIdempotency(
+  existing: UsageRecord | undefined,
+  fingerprint: NormalizedUsageFingerprint
+): boolean {
+  if (!existing) return false;
+  const isExactReplay =
+    existing.customerId === fingerprint.customerId &&
+    existing.agentProductId === fingerprint.agentProductId &&
+    existing.sourceReference === fingerprint.sourceReference &&
+    existing.occurredAt === fingerprint.occurredAt &&
+    existing.tokenQuantity === fingerprint.tokenQuantity;
+  if (isExactReplay) return true;
+  throw new Error(
+    `Source reference "${fingerprint.sourceReference}" is already assigned to different usage.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -442,4 +520,222 @@ export function projectAccountStatement(
     runningBalance += transaction.amountTokens;
     return { transaction, resultingBalanceTokens: runningBalance };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Pure next-store transitions
+// ---------------------------------------------------------------------------
+
+/**
+ * Operator-entered usage debit details (D-08). `occurredAt` is supplied
+ * separately by the repository command; `reason` is optional because the
+ * Record-usage workflow has no reason field.
+ */
+export interface UsageDebitInput {
+  customerId: string;
+  agentProductId: string;
+  tokenQuantity: number;
+  sourceReference: string;
+  reason?: string;
+}
+
+export interface UsageDebitTransitionResult {
+  store: DataStore;
+  usage: UsageRecord;
+  transaction: UsageDebitTransaction;
+}
+
+/**
+ * Pure next-store transition for an atomic usage debit (D-08, USGE-01):
+ * appends exactly one {@link UsageRecord} and one linked `usage_debit`
+ * {@link LedgerTransaction} whose amount is exactly `-tokenQuantity`.
+ * The candidate is validated through {@link validateLedgerTransaction} and
+ * {@link assertNoNegativeBalance} before a next store is produced, so a
+ * rejected debit never yields a partial usage/ledger write. Idempotency
+ * lookup is the repository's job; this transition always appends.
+ */
+export function recordUsage(
+  store: DataStore,
+  input: UsageDebitInput,
+  occurredAt: string
+): UsageDebitTransitionResult {
+  const fingerprint = normalizeUsageFingerprint({
+    customerId: input.customerId,
+    agentProductId: input.agentProductId,
+    sourceReference: input.sourceReference,
+    occurredAt,
+    tokenQuantity: input.tokenQuantity,
+  });
+  if (!fingerprint) {
+    throw new Error(
+      "Usage requires a customer, agent product, positive whole token quantity, canonical ISO occurredAt, and a source reference."
+    );
+  }
+  const usage: UsageRecord = {
+    id: usageRecordId(fingerprint.sourceReference),
+    customerId: fingerprint.customerId,
+    agentProductId: fingerprint.agentProductId,
+    occurredAt: fingerprint.occurredAt,
+    tokenQuantity: fingerprint.tokenQuantity,
+    sourceReference: fingerprint.sourceReference,
+    ledgerTransactionId: usageDebitTransactionId(fingerprint.sourceReference),
+  };
+  const transaction: UsageDebitTransaction = {
+    id: usageDebitTransactionId(fingerprint.sourceReference),
+    customerId: fingerprint.customerId,
+    occurredAt: fingerprint.occurredAt,
+    kind: "usage_debit",
+    amountTokens: -fingerprint.tokenQuantity,
+    reason: input.reason?.trim() || "Agent usage.",
+    reference: fingerprint.sourceReference,
+    usageRecordId: usage.id,
+    agentProductId: fingerprint.agentProductId,
+  };
+  const validation = validateLedgerTransaction(transaction, { usage });
+  if (!validation.ok) {
+    throw new Error(validation.problems.join(" "));
+  }
+  assertNoNegativeBalance(
+    store.ledgerTransactions,
+    fingerprint.customerId,
+    transaction.amountTokens
+  );
+  return {
+    store: {
+      ...store,
+      ledgerTransactions: [...store.ledgerTransactions, transaction],
+      usageRecords: [...store.usageRecords, usage],
+    },
+    usage,
+    transaction,
+  };
+}
+
+/**
+ * Operator-entered manual adjustment details (D-06, LEDG-04). `amountTokens`
+ * is a non-zero signed whole-token amount; `reason` and `reference` are
+ * required and trimmed.
+ */
+export interface ManualAdjustmentInput {
+  customerId: string;
+  amountTokens: number;
+  reference: string;
+  reason: string;
+}
+
+export interface ManualAdjustmentTransitionResult {
+  store: DataStore;
+  transaction: ManualAdjustmentTransaction;
+}
+
+/**
+ * Pure next-store transition for a manual adjustment (D-06, LEDG-04): appends
+ * exactly one non-zero signed whole-token `manual_adjustment` with a required
+ * reason and reference. The candidate is validated through
+ * {@link validateLedgerTransaction} and {@link assertNoNegativeBalance} before
+ * a next store is produced.
+ */
+export function applyManualAdjustment(
+  store: DataStore,
+  input: ManualAdjustmentInput,
+  occurredAt: string
+): ManualAdjustmentTransitionResult {
+  const customerId = input.customerId.trim();
+  const transaction: ManualAdjustmentTransaction = {
+    id: manualAdjustmentTransactionId(customerId, occurredAt),
+    customerId,
+    occurredAt,
+    kind: "manual_adjustment",
+    amountTokens: input.amountTokens,
+    reason: input.reason.trim(),
+    reference: input.reference.trim(),
+  };
+  const validation = validateLedgerTransaction(transaction);
+  if (!validation.ok) {
+    throw new Error(validation.problems.join(" "));
+  }
+  assertNoNegativeBalance(
+    store.ledgerTransactions,
+    customerId,
+    transaction.amountTokens
+  );
+  return {
+    store: {
+      ...store,
+      ledgerTransactions: [...store.ledgerTransactions, transaction],
+    },
+    transaction,
+  };
+}
+
+/**
+ * Operator-entered reversal details (D-05, LEDG-04). `transactionId` is the
+ * immutable target being reversed; `reason` and `reference` are required and
+ * trimmed.
+ */
+export interface ReversalInput {
+  customerId: string;
+  transactionId: string;
+  reference: string;
+  reason: string;
+}
+
+export interface ReversalTransitionResult {
+  store: DataStore;
+  transaction: ReversalTransaction;
+}
+
+/**
+ * Pure next-store transition for a single full reversal (D-05, LEDG-04):
+ * appends exactly one `reversal` whose amount is the exact negation of the
+ * target transaction's amount, with a required reason and reference. Rejects
+ * a missing target, a target from a different customer, a reversal-of-reversal,
+ * a second reversal of the same target, and any reversal that would make the
+ * derived balance negative — all before a next store is produced.
+ */
+export function reverseTransaction(
+  store: DataStore,
+  input: ReversalInput,
+  occurredAt: string
+): ReversalTransitionResult {
+  const customerId = input.customerId.trim();
+  const targetId = input.transactionId.trim();
+  const target = store.ledgerTransactions.find(
+    (transaction) => transaction.id === targetId
+  );
+  if (!target) {
+    throw new Error(`Ledger transaction with id "${targetId}" does not exist.`);
+  }
+  const transaction: ReversalTransaction = {
+    id: reversalTransactionId(targetId),
+    customerId,
+    occurredAt,
+    kind: "reversal",
+    amountTokens: -target.amountTokens,
+    reason: input.reason.trim(),
+    reference: input.reference.trim(),
+    reversesTransactionId: targetId,
+  };
+  validateReversal(
+    store.ledgerTransactions,
+    targetId,
+    customerId,
+    transaction.amountTokens
+  );
+  const validation = validateLedgerTransaction(transaction, { target });
+  if (!validation.ok) {
+    throw new Error(validation.problems.join(" "));
+  }
+  assertNoNegativeBalance(
+    store.ledgerTransactions,
+    customerId,
+    transaction.amountTokens
+  );
+  return {
+    store: {
+      ...store,
+      ledgerTransactions: [...store.ledgerTransactions, transaction],
+    },
+    transaction,
+  };
 }

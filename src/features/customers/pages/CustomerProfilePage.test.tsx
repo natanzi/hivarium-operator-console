@@ -7,10 +7,11 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import { Toaster } from "sonner";
-import { describe, expect, it } from "vitest";
+import { toast, Toaster } from "sonner";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { CustomerProfilePage } from "./CustomerProfilePage";
+import { ReversalSheet } from "@/features/customers/components/ReversalSheet";
 import {
   createInMemoryRepository,
   type HiveRepository,
@@ -19,6 +20,13 @@ import { RepositoryProvider } from "@/data/repository-context";
 import { SEED_NOW } from "@/data/seed-data";
 
 const STORAGE_KEY = "hivarium.operator-console.store.v1";
+
+// Sonner keeps a module-global toast store, so a toast fired in one test
+// would otherwise still be rendered by the next test's <Toaster /> and make
+// `findByText` queries ambiguous. Dismiss every toast after each test.
+afterEach(() => {
+  toast.dismiss();
+});
 
 /** Renders the page inside a memory router + repo provider + toast surface. */
 function renderProfilePath(
@@ -52,6 +60,33 @@ async function openAccessSheet(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByTestId("tab-agent-access"));
   await user.click(screen.getByTestId("grant-agent-access"));
   return screen.findByTestId("access-sheet");
+}
+
+/** Opens the Record usage sheet from the Activity tab. */
+async function openUsageSheet(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("tab-activity"));
+  await user.click(screen.getByTestId("record-usage"));
+  return screen.findByTestId("record-usage-sheet");
+}
+
+/** Opens the Adjust balance sheet from the Commercial tab. */
+async function openAdjustmentSheet(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("tab-commercial"));
+  await user.click(screen.getByTestId("adjust-balance"));
+  return screen.findByTestId("adjustment-sheet");
+}
+
+/** Opens the Reverse transaction sheet from the Activity tab. */
+async function openReversalSheet(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("tab-activity"));
+  await user.click(screen.getByTestId("reverse-transaction"));
+  return screen.findByTestId("reversal-sheet");
+}
+
+/** Selects the Sentinel agent inside the Record usage sheet. */
+async function chooseUsageAgent(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("usage-agent-trigger"));
+  await user.click(screen.getByTestId("usage-agent-option-agent_sentinel"));
 }
 
 describe("CustomerProfilePage", () => {
@@ -881,6 +916,501 @@ describe("CustomerProfilePage", () => {
     expect(
       screen.getByText("No commercial or access changes have been recorded yet.")
     ).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Record usage sheet
+  // -------------------------------------------------------------------------
+
+  it("opens the Record usage sheet from the Activity tab with customer and balance", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    const sheet = await openUsageSheet(user);
+    expect(sheet).toHaveTextContent("Record usage");
+    expect(sheet).toHaveTextContent("Meridians Health");
+    expect(sheet).toHaveTextContent("Available balance");
+    expect(sheet).toHaveTextContent("250,000 tokens");
+  });
+
+  it("lists only catalog agents the customer may currently use", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await openUsageSheet(user);
+    await user.click(screen.getByTestId("usage-agent-trigger"));
+    expect(
+      screen.getByTestId("usage-agent-option-agent_sentinel")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("usage-agent-option-agent_courier")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("usage-agent-option-agent_mercator")
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps Review usage disabled until every required field is valid", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await openUsageSheet(user);
+    const review = screen.getByTestId("review-usage");
+    expect(review).toBeDisabled();
+
+    await user.type(screen.getByTestId("usage-tokens"), "0");
+    expect(
+      screen.getByText("Tokens consumed must be a positive whole number.")
+    ).toBeInTheDocument();
+    expect(review).toBeDisabled();
+
+    await user.clear(screen.getByTestId("usage-tokens"));
+    await user.type(screen.getByTestId("usage-tokens"), "1200");
+    await chooseUsageAgent(user);
+    await user.type(
+      screen.getByTestId("usage-source-reference"),
+      "usage_valid_001"
+    );
+    expect(review).toBeEnabled();
+  });
+
+  it("shows the projected resulting balance live", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await openUsageSheet(user);
+    const resulting = screen.getByTestId("usage-resulting-balance");
+    expect(resulting).toHaveTextContent("250,000 tokens");
+    await user.type(screen.getByTestId("usage-tokens"), "1200");
+    expect(resulting).toHaveTextContent("248,800 tokens");
+  });
+
+  it("records usage through the named-customer confirmation with exact copy", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openUsageSheet(user);
+    await chooseUsageAgent(user);
+    await user.type(screen.getByTestId("usage-tokens"), "1200");
+    await user.type(
+      screen.getByTestId("usage-source-reference"),
+      "usage_test_001"
+    );
+    await user.click(screen.getByTestId("review-usage"));
+
+    const confirmation = screen.getByTestId("usage-confirmation");
+    expect(confirmation).toHaveTextContent(
+      "Record 1,200 tokens of usage for Meridians Health?"
+    );
+    expect(confirmation).toHaveTextContent("Sentinel will consume 1,200 tokens.");
+    expect(confirmation).toHaveTextContent("Source reference: usage_test_001");
+    expect(confirmation).toHaveTextContent(
+      "The balance will change from 250,000 tokens to 248,800 tokens."
+    );
+
+    await user.click(screen.getByTestId("confirm-record-usage"));
+    expect(await screen.findByText("Usage recorded")).toBeInTheDocument();
+    expect(
+      screen.getByText("1,200 tokens were deducted for Sentinel.")
+    ).toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+  });
+
+  it("announces an exact replay with no additional deduction", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openUsageSheet(user);
+    await chooseUsageAgent(user);
+    await user.type(screen.getByTestId("usage-tokens"), "1200");
+    await user.type(
+      screen.getByTestId("usage-source-reference"),
+      "usage_replay_001"
+    );
+    await user.click(screen.getByTestId("review-usage"));
+    await user.click(screen.getByTestId("confirm-record-usage"));
+    expect(await screen.findByText("Usage recorded")).toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+
+    // Re-submit the identical source reference with identical values.
+    await openUsageSheet(user);
+    await chooseUsageAgent(user);
+    await user.type(screen.getByTestId("usage-tokens"), "1200");
+    await user.type(
+      screen.getByTestId("usage-source-reference"),
+      "usage_replay_001"
+    );
+    await user.click(screen.getByTestId("review-usage"));
+    await user.click(screen.getByTestId("confirm-record-usage"));
+
+    expect(await screen.findByText("Usage already recorded")).toBeInTheDocument();
+    expect(
+      screen.getByText("No additional tokens were deducted.")
+    ).toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+  });
+
+  it("preserves the form and shows the conflict message on conflicting reuse", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openUsageSheet(user);
+    await chooseUsageAgent(user);
+    await user.type(screen.getByTestId("usage-tokens"), "100");
+    await user.type(
+      screen.getByTestId("usage-source-reference"),
+      "usage_conflict_001"
+    );
+    await user.click(screen.getByTestId("review-usage"));
+    await user.click(screen.getByTestId("confirm-record-usage"));
+    expect(await screen.findByText("Usage recorded")).toBeInTheDocument();
+
+    // Reuse the reference with a different token quantity.
+    await openUsageSheet(user);
+    await chooseUsageAgent(user);
+    await user.type(screen.getByTestId("usage-tokens"), "200");
+    await user.type(
+      screen.getByTestId("usage-source-reference"),
+      "usage_conflict_001"
+    );
+    await user.click(screen.getByTestId("review-usage"));
+    await user.click(screen.getByTestId("confirm-record-usage"));
+
+    expect(await screen.findByTestId("usage-conflict-message")).toHaveTextContent(
+      'Source reference "usage_conflict_001" is already assigned to different usage. Enter a unique source reference or restore the original values.'
+    );
+    expect(screen.getByTestId("usage-tokens")).toHaveValue(200);
+    expect(screen.getByTestId("usage-source-reference")).toHaveValue(
+      "usage_conflict_001"
+    );
+    expect(repository.getTokenBalance("cust_meridians")).toBe(249900);
+  });
+
+  it("blocks usage that would exceed the balance before the confirmation", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openUsageSheet(user);
+    await chooseUsageAgent(user);
+    await user.type(screen.getByTestId("usage-tokens"), "300000");
+    await user.type(
+      screen.getByTestId("usage-source-reference"),
+      "usage_big_001"
+    );
+    await user.click(screen.getByTestId("review-usage"));
+
+    expect(screen.getByTestId("usage-insufficient-message")).toHaveTextContent(
+      "Usage was not recorded. Meridians Health has 250,000 tokens available, but this debit requires 300,000 tokens."
+    );
+    expect(screen.queryByTestId("usage-confirmation")).not.toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(250000);
+  });
+
+  it("asks to discard a dirty usage draft before closing", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await openUsageSheet(user);
+    await user.type(screen.getByTestId("usage-tokens"), "100");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByText("Discard usage draft?")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Continue editing" })
+    );
+    expect(screen.queryByText("Discard usage draft?")).not.toBeInTheDocument();
+    expect(screen.getByTestId("record-usage-sheet")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(
+      screen.getByRole("button", { name: "Discard usage draft" })
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("record-usage-sheet")).not.toBeInTheDocument()
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Adjustment sheet
+  // -------------------------------------------------------------------------
+
+  it("opens the Adjust balance sheet from the Commercial tab", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    const sheet = await openAdjustmentSheet(user);
+    expect(sheet).toHaveTextContent("Adjust balance");
+    expect(sheet).toHaveTextContent("Meridians Health");
+    expect(sheet).toHaveTextContent("Current balance");
+    expect(sheet).toHaveTextContent("250,000 tokens");
+  });
+
+  it("applies a positive adjustment through the named-customer confirmation", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openAdjustmentSheet(user);
+    await user.type(screen.getByTestId("adjustment-amount"), "500");
+    await user.type(screen.getByTestId("adjustment-reference"), "adj_add_001");
+    await user.type(screen.getByTestId("adjustment-reason"), "Test credit");
+    await user.click(screen.getByTestId("review-adjustment"));
+
+    const confirmation = screen.getByTestId("adjustment-confirmation");
+    expect(confirmation).toHaveTextContent("Adjust Meridians Health's balance?");
+    expect(confirmation).toHaveTextContent("+500 tokens will be applied.");
+    expect(confirmation).toHaveTextContent(
+      "The balance will change from 250,000 tokens to 250,500 tokens."
+    );
+
+    await user.click(screen.getByTestId("confirm-apply-adjustment"));
+    expect(
+      await screen.findByText("Balance adjustment recorded")
+    ).toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(250500);
+  });
+
+  it("applies a negative adjustment through the named-customer confirmation", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openAdjustmentSheet(user);
+    await user.click(screen.getByLabelText("Remove tokens"));
+    await user.type(screen.getByTestId("adjustment-amount"), "500");
+    await user.type(screen.getByTestId("adjustment-reference"), "adj_rm_001");
+    await user.type(screen.getByTestId("adjustment-reason"), "Test removal");
+    await user.click(screen.getByTestId("review-adjustment"));
+
+    const confirmation = screen.getByTestId("adjustment-confirmation");
+    expect(confirmation).toHaveTextContent("Adjust Meridians Health's balance?");
+    expect(confirmation).toHaveTextContent("−500 tokens will be applied.");
+    expect(confirmation).toHaveTextContent(
+      "The balance will change from 250,000 tokens to 249,500 tokens."
+    );
+
+    await user.click(screen.getByTestId("confirm-apply-adjustment"));
+    expect(
+      await screen.findByText("Balance adjustment recorded")
+    ).toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(249500);
+  });
+
+  it("blocks a negative-resulting adjustment before the confirmation", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openAdjustmentSheet(user);
+    await user.click(screen.getByLabelText("Remove tokens"));
+    await user.type(screen.getByTestId("adjustment-amount"), "300000");
+    await user.type(screen.getByTestId("adjustment-reference"), "adj_big_001");
+    await user.type(screen.getByTestId("adjustment-reason"), "Too large");
+    await user.click(screen.getByTestId("review-adjustment"));
+
+    expect(screen.getByTestId("adjustment-blocked-message")).toHaveTextContent(
+      "Adjustment was not applied. Removing 300,000 tokens would exceed the available balance of 250,000 tokens."
+    );
+    expect(screen.queryByTestId("adjustment-confirmation")).not.toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(250000);
+  });
+
+  it("keeps Review adjustment disabled until amount, reference, and reason are valid", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await openAdjustmentSheet(user);
+    const review = screen.getByTestId("review-adjustment");
+    expect(review).toBeDisabled();
+
+    await user.type(screen.getByTestId("adjustment-amount"), "0");
+    expect(
+      screen.getByText("Token amount must be a positive whole number.")
+    ).toBeInTheDocument();
+    expect(review).toBeDisabled();
+
+    await user.clear(screen.getByTestId("adjustment-amount"));
+    await user.type(screen.getByTestId("adjustment-amount"), "500");
+    await user.type(screen.getByTestId("adjustment-reference"), "adj_valid_001");
+    await user.type(screen.getByTestId("adjustment-reason"), "Valid");
+    expect(review).toBeEnabled();
+  });
+
+  it("asks to discard a dirty adjustment draft before closing", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await openAdjustmentSheet(user);
+    await user.type(screen.getByTestId("adjustment-amount"), "100");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByText("Discard adjustment draft?")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Continue editing" })
+    );
+    expect(screen.queryByText("Discard adjustment draft?")).not.toBeInTheDocument();
+    expect(screen.getByTestId("adjustment-sheet")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(
+      screen.getByRole("button", { name: "Discard adjustment draft" })
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("adjustment-sheet")).not.toBeInTheDocument()
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Reversal sheet
+  // -------------------------------------------------------------------------
+
+  it("opens the Reverse transaction sheet showing the immutable original", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    const sheet = await openReversalSheet(user);
+    expect(sheet).toHaveTextContent("Reverse transaction");
+    const original = screen.getByTestId("reversal-original-transaction");
+    expect(original).toHaveTextContent("Credit grant");
+    expect(original).toHaveTextContent("+250,000 tokens");
+    expect(original).toHaveTextContent("opening_arr_meridians_prepaid");
+    expect(original).toHaveTextContent("Opening token credit from prototype migration");
+  });
+
+  it("reverses the target through the named-customer confirmation with exact copy", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openReversalSheet(user);
+    await user.type(screen.getByTestId("reversal-reference"), "rev_test_001");
+    await user.type(screen.getByTestId("reversal-reason"), "Test reversal");
+    await user.click(screen.getByTestId("review-reversal"));
+
+    const confirmation = screen.getByTestId("reversal-confirmation");
+    expect(confirmation).toHaveTextContent(
+      "Reverse this transaction for Meridians Health?"
+    );
+    expect(confirmation).toHaveTextContent(
+      "The original transaction of +250,000 tokens will be reversed by −250,000 tokens."
+    );
+    expect(confirmation).toHaveTextContent(
+      "The balance will change from 250,000 tokens to 0 tokens."
+    );
+    expect(confirmation).toHaveTextContent(
+      "The original record will remain visible."
+    );
+
+    await user.click(screen.getByTestId("confirm-reverse-transaction"));
+    expect(await screen.findByText("Transaction reversed")).toBeInTheDocument();
+    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+  });
+
+  it("blocks a second reversal of the same target with the precise reason", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    renderProfilePath("/customers/cust_meridians", repository);
+
+    await openReversalSheet(user);
+    await user.type(screen.getByTestId("reversal-reference"), "rev_first_001");
+    await user.type(screen.getByTestId("reversal-reason"), "First reversal");
+    await user.click(screen.getByTestId("review-reversal"));
+    await user.click(screen.getByTestId("confirm-reverse-transaction"));
+    expect(await screen.findByText("Transaction reversed")).toBeInTheDocument();
+
+    await openReversalSheet(user);
+    await user.type(screen.getByTestId("reversal-reference"), "rev_second_001");
+    await user.type(screen.getByTestId("reversal-reason"), "Second reversal");
+    await user.click(screen.getByTestId("review-reversal"));
+    await user.click(screen.getByTestId("confirm-reverse-transaction"));
+
+    expect(await screen.findByTestId("reversal-blocked-message")).toHaveTextContent(
+      "This transaction has already been reversed."
+    );
+    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+  });
+
+  it("blocks a reversal-of-reversal with the precise reason", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    const reversal = repository.reverseTransaction(
+      {
+        customerId: "cust_meridians",
+        transactionId: "txn_opening_arr_meridians_prepaid",
+        reference: "rev_setup_001",
+        reason: "Setup reversal",
+      },
+      SEED_NOW
+    );
+    const customer = repository.getCustomer("cust_meridians");
+    expect(customer).toBeDefined();
+    render(
+      <RepositoryProvider repository={repository}>
+        <ReversalSheet
+          customer={customer!}
+          transaction={reversal}
+          balanceTokens={0}
+          open
+          onOpenChange={() => {}}
+          onSaved={() => {}}
+        />
+        <Toaster position="bottom-right" />
+      </RepositoryProvider>
+    );
+
+    await user.type(screen.getByTestId("reversal-reference"), "rev_of_rev_001");
+    await user.type(screen.getByTestId("reversal-reason"), "Reversing the reversal");
+    await user.click(screen.getByTestId("review-reversal"));
+    await user.click(screen.getByTestId("confirm-reverse-transaction"));
+
+    expect(await screen.findByTestId("reversal-blocked-message")).toHaveTextContent(
+      "A reversal transaction cannot be reversed."
+    );
+  });
+
+  it("blocks a reversal that would make the balance negative", async () => {
+    const user = userEvent.setup();
+    const { repository } = createInMemoryRepository();
+    const customer = repository.getCustomer("cust_meridians");
+    const openingCredit = repository
+      .listLedgerTransactions("cust_meridians")
+      .find((transaction) => transaction.kind === "credit_grant");
+    expect(customer).toBeDefined();
+    expect(openingCredit).toBeDefined();
+    render(
+      <RepositoryProvider repository={repository}>
+        <ReversalSheet
+          customer={customer!}
+          transaction={openingCredit!}
+          balanceTokens={100}
+          open
+          onOpenChange={() => {}}
+          onSaved={() => {}}
+        />
+        <Toaster position="bottom-right" />
+      </RepositoryProvider>
+    );
+
+    await user.type(screen.getByTestId("reversal-reference"), "rev_neg_001");
+    await user.type(screen.getByTestId("reversal-reason"), "Negative result");
+    await user.click(screen.getByTestId("review-reversal"));
+
+    expect(screen.getByTestId("reversal-blocked-message")).toHaveTextContent(
+      "Transaction cannot be reversed because the resulting balance would be negative."
+    );
+    expect(screen.queryByTestId("reversal-confirmation")).not.toBeInTheDocument();
+  });
+
+  it("asks to discard a dirty reversal draft before closing", async () => {
+    const user = userEvent.setup();
+    renderProfilePath("/customers/cust_meridians");
+    await openReversalSheet(user);
+    await user.type(screen.getByTestId("reversal-reference"), "rev_dirty_001");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByText("Discard reversal draft?")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Continue editing" })
+    );
+    expect(screen.queryByText("Discard reversal draft?")).not.toBeInTheDocument();
+    expect(screen.getByTestId("reversal-sheet")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(
+      screen.getByRole("button", { name: "Discard reversal draft" })
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("reversal-sheet")).not.toBeInTheDocument()
+    );
   });
 
   // -------------------------------------------------------------------------

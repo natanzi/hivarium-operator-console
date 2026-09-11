@@ -11,10 +11,7 @@ export default defineConfig({
         baseURL: 'http://localhost:4173',
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
-        // Instead of using bundled chromium which lacks libs in this sandbox,
-        // we instruct playwright to try using the system-installed chrome/chromium.
-        channel: 'chromium',
-    },
+        },
     projects: [
         {
             name: 'chromium',

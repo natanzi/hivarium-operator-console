@@ -463,4 +463,216 @@ test.describe("Hivarium Operator Console E2E", () => {
         await expect(row).toContainText("250,000 tokens");
         await expect(row).toContainText("300,000 tokens");
     });
+
+    // -------------------------------------------------------------------------
+    // Usage and corrections: atomic debit, idempotent replay, conflict, single
+    // reversal, and insufficient-balance block (02-02 Task 3)
+    // -------------------------------------------------------------------------
+
+    test("usage debit is atomic, idempotent, and conflict-safe", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-activity").click();
+        await expect(page.getByTestId("panel-activity")).toContainText("250,000 tokens");
+
+        // First debit: record 1,200 tokens for Sentinel through the named
+        // customer confirmation and assert the reduced derived balance.
+        await page.getByTestId("record-usage").click();
+        const sheet = page.getByTestId("record-usage-sheet");
+        await expect(sheet).toBeVisible();
+        await expect(sheet).toContainText("Available balance");
+        await expect(sheet).toContainText("250,000 tokens");
+
+        await page.getByTestId("usage-agent-trigger").click();
+        await page.getByTestId("usage-agent-option-agent_sentinel").click();
+        await page.getByTestId("usage-tokens").fill("1200");
+        await page.getByTestId("usage-source-reference").fill("e2e_usage_atomic_001");
+        await expect(page.getByTestId("usage-resulting-balance")).toContainText(
+            "248,800 tokens"
+        );
+
+        await page.getByTestId("review-usage").click();
+        const confirmation = page.getByTestId("usage-confirmation");
+        await expect(confirmation).toBeVisible();
+        await expect(confirmation).toContainText(
+            "Record 1,200 tokens of usage for Meridians Health?"
+        );
+        await expect(confirmation).toContainText("Sentinel will consume 1,200 tokens.");
+        await expect(confirmation).toContainText("Source reference: e2e_usage_atomic_001");
+        await expect(confirmation).toContainText(
+            "The balance will change from 250,000 tokens to 248,800 tokens."
+        );
+
+        await page.getByTestId("confirm-record-usage").click();
+        await expect(page.getByText("Usage recorded")).toBeVisible();
+        await expect(page.getByText("1,200 tokens were deducted for Sentinel.")).toBeVisible();
+        await expect(sheet).toHaveCount(0);
+        await expect(page.getByTestId("panel-activity")).toContainText("248,800 tokens");
+
+        // The atomic usage+debit write survives a full page refresh.
+        await page.reload();
+        await page.getByTestId("tab-activity").click();
+        await expect(page.getByTestId("panel-activity")).toContainText("248,800 tokens");
+
+        // Exact replay: the identical source reference and values perform no
+        // write and announce "Usage already recorded".
+        await page.getByTestId("record-usage").click();
+        await expect(sheet).toBeVisible();
+        await expect(sheet).toContainText("248,800 tokens");
+        await page.getByTestId("usage-agent-trigger").click();
+        await page.getByTestId("usage-agent-option-agent_sentinel").click();
+        await page.getByTestId("usage-tokens").fill("1200");
+        await page.getByTestId("usage-source-reference").fill("e2e_usage_atomic_001");
+        await page.getByTestId("review-usage").click();
+        await page.getByTestId("confirm-record-usage").click();
+
+        await expect(page.getByText("Usage already recorded")).toBeVisible();
+        await expect(page.getByText("No additional tokens were deducted.")).toBeVisible();
+        await expect(sheet).toHaveCount(0);
+        await expect(page.getByTestId("panel-activity")).toContainText("248,800 tokens");
+
+        // Conflicting reuse: the same reference with a different token quantity
+        // is rejected with the source-reference conflict and no balance change.
+        await page.getByTestId("record-usage").click();
+        await expect(sheet).toBeVisible();
+        await page.getByTestId("usage-agent-trigger").click();
+        await page.getByTestId("usage-agent-option-agent_sentinel").click();
+        await page.getByTestId("usage-tokens").fill("2000");
+        await page.getByTestId("usage-source-reference").fill("e2e_usage_atomic_001");
+        await page.getByTestId("review-usage").click();
+        await page.getByTestId("confirm-record-usage").click();
+
+        await expect(page.getByTestId("usage-conflict-message")).toContainText(
+            'Source reference "e2e_usage_atomic_001" is already assigned to different usage. Enter a unique source reference or restore the original values.'
+        );
+        await expect(page.getByTestId("usage-tokens")).toHaveValue("2000");
+        await expect(sheet).toContainText("248,800 tokens");
+    });
+
+    test("manual adjustment and single reversal with named confirmations", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-commercial").click();
+        await expect(page.getByTestId("active-arrangement")).toContainText("250,000 tokens");
+
+        // Positive manual adjustment through the named-customer confirmation.
+        await page.getByTestId("adjust-balance").click();
+        const sheet = page.getByTestId("adjustment-sheet");
+        await expect(sheet).toBeVisible();
+        await expect(sheet).toContainText("Current balance");
+        await expect(sheet).toContainText("250,000 tokens");
+
+        await page.getByTestId("adjustment-amount").fill("500");
+        await page.getByTestId("adjustment-reference").fill("e2e_adj_add_001");
+        await page.getByTestId("adjustment-reason").fill("E2E positive adjustment");
+        await expect(page.getByTestId("adjustment-resulting-balance")).toContainText(
+            "250,500 tokens"
+        );
+
+        await page.getByTestId("review-adjustment").click();
+        const confirmation = page.getByTestId("adjustment-confirmation");
+        await expect(confirmation).toBeVisible();
+        await expect(confirmation).toContainText("Adjust Meridians Health's balance?");
+        await expect(confirmation).toContainText("+500 tokens will be applied.");
+        await expect(confirmation).toContainText(
+            "The balance will change from 250,000 tokens to 250,500 tokens."
+        );
+
+        await page.getByTestId("confirm-apply-adjustment").click();
+        await expect(page.getByText("Balance adjustment recorded")).toBeVisible();
+        await expect(sheet).toHaveCount(0);
+        await expect(page.getByTestId("active-arrangement")).toContainText("250,500 tokens");
+
+        // The adjustment persists across a full page refresh.
+        await page.reload();
+        await page.getByTestId("tab-commercial").click();
+        await expect(page.getByTestId("active-arrangement")).toContainText("250,500 tokens");
+
+        // Single full reversal of the adjustment through the named-customer
+        // confirmation; the immutable original remains visible.
+        await page.getByTestId("tab-activity").click();
+        await page.getByTestId("reverse-transaction").click();
+        const reversalSheet = page.getByTestId("reversal-sheet");
+        await expect(reversalSheet).toBeVisible();
+        const original = page.getByTestId("reversal-original-transaction");
+        await expect(original).toContainText("Manual adjustment");
+        await expect(original).toContainText("+500 tokens");
+
+        await page.getByTestId("reversal-reference").fill("e2e_rev_adj_001");
+        await page.getByTestId("reversal-reason").fill("E2E reversal of adjustment");
+        await expect(page.getByTestId("reversal-resulting-balance")).toContainText(
+            "250,000 tokens"
+        );
+
+        await page.getByTestId("review-reversal").click();
+        const reversalConfirmation = page.getByTestId("reversal-confirmation");
+        await expect(reversalConfirmation).toBeVisible();
+        await expect(reversalConfirmation).toContainText(
+            "Reverse this transaction for Meridians Health?"
+        );
+        await expect(reversalConfirmation).toContainText(
+            "The original transaction of +500 tokens will be reversed by −500 tokens."
+        );
+        await expect(reversalConfirmation).toContainText(
+            "The balance will change from 250,500 tokens to 250,000 tokens."
+        );
+        await expect(reversalConfirmation).toContainText(
+            "The original record will remain visible."
+        );
+
+        await page.getByTestId("confirm-reverse-transaction").click();
+        await expect(page.getByText("Transaction reversed")).toBeVisible();
+        await expect(reversalSheet).toHaveCount(0);
+        await expect(page.getByTestId("panel-activity")).toContainText("250,000 tokens");
+
+        // The original transaction row remains visible and a second reversal of
+        // the same target is rejected with the precise reason.
+        await page.getByTestId("reverse-transaction").click();
+        await expect(reversalSheet).toBeVisible();
+        await expect(page.getByTestId("reversal-original-transaction")).toContainText(
+            "Manual adjustment"
+        );
+        await expect(page.getByTestId("reversal-original-transaction")).toContainText(
+            "+500 tokens"
+        );
+
+        await page.getByTestId("reversal-reference").fill("e2e_rev_adj_002");
+        await page.getByTestId("reversal-reason").fill("E2E second reversal attempt");
+        await page.getByTestId("review-reversal").click();
+        await page.getByTestId("confirm-reverse-transaction").click();
+        await expect(page.getByTestId("reversal-blocked-message")).toContainText(
+            "This transaction has already been reversed."
+        );
+    });
+
+    test("insufficient balance blocks usage", async ({ page }) => {
+        await page.goto("/customers/cust_meridians");
+        await page.getByTestId("tab-activity").click();
+        await expect(page.getByTestId("panel-activity")).toContainText("250,000 tokens");
+
+        // A debit larger than the available balance is blocked before the final
+        // confirmation with the available and attempted token values.
+        await page.getByTestId("record-usage").click();
+        const sheet = page.getByTestId("record-usage-sheet");
+        await expect(sheet).toBeVisible();
+
+        await page.getByTestId("usage-agent-trigger").click();
+        await page.getByTestId("usage-agent-option-agent_sentinel").click();
+        await page.getByTestId("usage-tokens").fill("300000");
+        await page.getByTestId("usage-source-reference").fill("e2e_usage_insufficient_001");
+        await page.getByTestId("review-usage").click();
+
+        await expect(page.getByTestId("usage-insufficient-message")).toContainText(
+            "Usage was not recorded. Meridians Health has 250,000 tokens available, but this debit requires 300,000 tokens."
+        );
+        await expect(page.getByTestId("usage-confirmation")).toHaveCount(0);
+
+        // No ledger or usage row was added: discarding the draft leaves the
+        // derived balance unchanged.
+        await page.getByTestId("discard-usage-draft").click();
+        await page
+            .getByRole("alertdialog")
+            .getByRole("button", { name: "Discard usage draft" })
+            .click();
+        await expect(sheet).toHaveCount(0);
+        await expect(page.getByTestId("panel-activity")).toContainText("250,000 tokens");
+    });
 });

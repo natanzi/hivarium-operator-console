@@ -1,4 +1,7 @@
-import type { CommercialArrangement } from "@/domain/types";
+import type {
+  CommercialArrangement,
+  LedgerTransactionKind,
+} from "@/domain/types";
 import { formatDate } from "@/lib/format";
 
 /**
@@ -21,6 +24,25 @@ export function formatTokens(tokens: number): string {
   const count = tokens.toLocaleString("en-US");
   return `${count} ${tokens === 1 ? "token" : "tokens"}`;
 }
+
+/**
+ * Signed whole tokens for statement amounts, e.g. `+250 tokens` or
+ * `−250 tokens`. The sign is always explicit (U+2212 minus) so a debit is
+ * never conveyed by color or punctuation alone.
+ */
+export function formatSignedTokens(tokens: number): string {
+  const count = Math.abs(tokens).toLocaleString("en-US");
+  const sign = tokens < 0 ? "−" : "+";
+  return `${sign}${count} ${count === "1" ? "token" : "tokens"}`;
+}
+
+/** Human labels for the four immutable ledger transaction kinds. */
+export const TRANSACTION_KIND_LABELS: Record<LedgerTransactionKind, string> = {
+  credit_grant: "Credit grant",
+  usage_debit: "Usage debit",
+  manual_adjustment: "Manual adjustment",
+  reversal: "Reversal",
+};
 
 /** Human label for a commercial model. */
 export function modelLabel(model: CommercialArrangement["model"]): string {

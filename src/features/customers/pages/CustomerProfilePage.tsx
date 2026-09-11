@@ -36,6 +36,9 @@ import {
 import { AgentAccessSheet, RevokeAccessDialog } from "@/features/customers/components/AgentAccessSheet";
 import { ActivityTimeline } from "@/features/customers/components/ActivityTimeline";
 import { AddCreditSheet } from "@/features/customers/components/AddCreditSheet";
+import { AdjustmentSheet } from "@/features/customers/components/AdjustmentSheet";
+import { RecordUsageSheet } from "@/features/customers/components/RecordUsageSheet";
+import { ReversalSheet } from "@/features/customers/components/ReversalSheet";
 import { EditThresholdSheet } from "@/features/customers/components/EditThresholdSheet";
 import {
   formatTokens,
@@ -62,6 +65,9 @@ export function CustomerProfilePage() {
   const [commercialSheetOpen, setCommercialSheetOpen] = useState(false);
   const [accessSheetOpen, setAccessSheetOpen] = useState(false);
   const [addCreditOpen, setAddCreditOpen] = useState(false);
+  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [reversalOpen, setReversalOpen] = useState(false);
   const [editThresholdOpen, setEditThresholdOpen] = useState(false);
   const addCreditButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -75,6 +81,16 @@ export function CustomerProfilePage() {
   const accessSnapshot = repo.getAgentAccessSnapshot(customerId, SEED_NOW);
   const prepaidSnapshot = repo.getPrepaidSnapshot(customerId, SEED_NOW);
   const activityEvents = repo.listActivityEvents(customerId);
+  // Agent products the customer may currently use, for the Record usage sheet.
+  const availableAgentIds = accessSnapshot.current.map(
+    (grant) => grant.agentProductId
+  );
+  // Placeholder reversal target until the 02-03 statement wires per-row
+  // "Reverse transaction" actions: the most recent non-reversal transaction.
+  const ledgerTransactions = repo.listLedgerTransactions(customerId);
+  const reversalTarget =
+    [...ledgerTransactions].reverse().find((t) => t.kind !== "reversal") ??
+    null;
   const entitlements = useMemo(
     () => repo.getFeatureEntitlements(customerId),
     [repo, customerId]
@@ -162,6 +178,7 @@ export function CustomerProfilePage() {
             onChanged={refresh}
             onChangeCommercial={() => setCommercialSheetOpen(true)}
             onAddCredit={() => setAddCreditOpen(true)}
+            onAdjustBalance={() => setAdjustmentOpen(true)}
             onEditThreshold={() => setEditThresholdOpen(true)}
             addCreditButtonRef={addCreditButtonRef}
           />
@@ -176,6 +193,35 @@ export function CustomerProfilePage() {
           />
         </TabsContent>
         <TabsContent value="activity" data-testid="panel-activity">
+          {prepaidSnapshot.arrangement ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">Token account</h3>
+                <p className="text-muted-foreground text-xs">
+                  Balance {formatTokens(prepaidSnapshot.balanceTokens)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {reversalTarget ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => setReversalOpen(true)}
+                    data-testid="reverse-transaction"
+                    className={TOUCH_TARGET}
+                  >
+                    Reverse transaction
+                  </Button>
+                ) : null}
+                <Button
+                  onClick={() => setUsageOpen(true)}
+                  data-testid="record-usage"
+                  className={TOUCH_TARGET}
+                >
+                  Record usage
+                </Button>
+              </div>
+            </div>
+          ) : null}
           <ActivityTimeline events={activityEvents} products={products} />
         </TabsContent>
       </Tabs>
@@ -203,6 +249,32 @@ export function CustomerProfilePage() {
         onSaved={refresh}
         addCreditButtonRef={addCreditButtonRef}
       />
+      <AdjustmentSheet
+        customer={customer}
+        balanceTokens={prepaidSnapshot.balanceTokens}
+        open={adjustmentOpen}
+        onOpenChange={setAdjustmentOpen}
+        onSaved={refresh}
+      />
+      <RecordUsageSheet
+        customer={customer}
+        balanceTokens={prepaidSnapshot.balanceTokens}
+        products={products}
+        availableAgentIds={availableAgentIds}
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        onSaved={refresh}
+      />
+      {reversalTarget ? (
+        <ReversalSheet
+          customer={customer}
+          transaction={reversalTarget}
+          balanceTokens={prepaidSnapshot.balanceTokens}
+          open={reversalOpen}
+          onOpenChange={setReversalOpen}
+          onSaved={refresh}
+        />
+      ) : null}
       {prepaidSnapshot.arrangement ? (
         <EditThresholdSheet
           customer={customer}
@@ -403,6 +475,7 @@ function CommercialPanel({
   onChanged,
   onChangeCommercial,
   onAddCredit,
+  onAdjustBalance,
   onEditThreshold,
   addCreditButtonRef,
 }: {
@@ -413,6 +486,7 @@ function CommercialPanel({
   onChanged: () => void;
   onChangeCommercial: () => void;
   onAddCredit: () => void;
+  onAdjustBalance: () => void;
   onEditThreshold: () => void;
   addCreditButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
@@ -430,6 +504,7 @@ function CommercialPanel({
           onChange={onChangeCommercial}
           onTerminate={() => setTerminateTarget(snapshot.active)}
           onAddCredit={onAddCredit}
+          onAdjustBalance={onAdjustBalance}
           onEditThreshold={onEditThreshold}
           addCreditButtonRef={addCreditButtonRef}
         />
@@ -510,6 +585,7 @@ function ArrangementCard({
   onChange,
   onTerminate,
   onAddCredit,
+  onAdjustBalance,
   onEditThreshold,
   addCreditButtonRef,
 }: {
@@ -518,6 +594,7 @@ function ArrangementCard({
   onChange: () => void;
   onTerminate: () => void;
   onAddCredit: () => void;
+  onAdjustBalance: () => void;
   onEditThreshold: () => void;
   addCreditButtonRef: React.RefObject<HTMLButtonElement | null>;
 }) {
@@ -560,6 +637,14 @@ function ArrangementCard({
                 ref={addCreditButtonRef}
               >
                 Add credit
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onAdjustBalance}
+                data-testid="adjust-balance"
+              >
+                Adjust balance
               </Button>
               <Button
                 variant="ghost"

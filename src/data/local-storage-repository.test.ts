@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { createInMemoryRepository } from "@/data/local-storage-repository";
+import {
+  createInMemoryRepository,
+  type StorageLike,
+} from "@/data/local-storage-repository";
 import { AGENT_PRODUCTS, SEED_NOW } from "@/data/seed-data";
-import type { DataStoreV1 } from "@/domain/types";
+import type { DataStore, DataStoreV1 } from "@/domain/types";
 
 /**
  * Storage key used by the repository. Kept in sync with the implementation;
  * the migration test seeds a legacy v1 payload under this exact key.
  */
 const STORAGE_KEY = "hivarium.operator-console.store.v1";
+
+/** Reads the persisted store so tests can assert exact write behavior. */
+function readPersistedStore(storage: StorageLike): DataStore {
+  const raw = storage.getItem(STORAGE_KEY);
+  return JSON.parse(raw!) as DataStore;
+}
 
 describe("LocalStorageRepository commercial and access lifecycle", () => {
   it("derives legacy subscriptions from monthly arrangements", () => {
@@ -544,5 +553,273 @@ describe("migrateStore", () => {
     expect(repository.listActivityEvents("cust_legacy").length).toBeGreaterThan(
       0
     );
+  });
+});
+
+describe("recordUsageDebit", () => {
+  const usageInput = {
+    customerId: "cust_meridians",
+    agentProductId: "agent_sentinel",
+    tokenQuantity: 1200,
+    sourceReference: "usage_meridians_001",
+  };
+
+  it("commits the usage record and linked usage_debit atomically", () => {
+    const { repository, storage } = createInMemoryRepository();
+    const result = repository.recordUsageDebit(usageInput, SEED_NOW);
+    expect(result.usage).toMatchObject({
+      customerId: "cust_meridians",
+      agentProductId: "agent_sentinel",
+      tokenQuantity: 1200,
+      sourceReference: "usage_meridians_001",
+    });
+    expect(result.transaction).toMatchObject({
+      kind: "usage_debit",
+      amountTokens: -1200,
+      usageRecordId: result.usage.id,
+      agentProductId: "agent_sentinel",
+    });
+    // Both records land in the same persisted write.
+    const persisted = readPersistedStore(storage);
+    expect(persisted.usageRecords).toHaveLength(1);
+    expect(persisted.ledgerTransactions).toHaveLength(2);
+    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+  });
+
+  it("returns the existing pair without writing on an exact replay", () => {
+    const { repository, storage } = createInMemoryRepository();
+    const first = repository.recordUsageDebit(usageInput, SEED_NOW);
+    const before = storage.getItem(STORAGE_KEY);
+    const replay = repository.recordUsageDebit(usageInput, SEED_NOW);
+    expect(replay.usage.id).toBe(first.usage.id);
+    expect(replay.transaction.id).toBe(first.transaction.id);
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
+    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+  });
+
+  it("rejects a conflicting reuse of the source reference without writing", () => {
+    const { repository, storage } = createInMemoryRepository();
+    repository.recordUsageDebit(usageInput, SEED_NOW);
+    const before = storage.getItem(STORAGE_KEY);
+    expect(() =>
+      repository.recordUsageDebit(
+        { ...usageInput, tokenQuantity: 999 },
+        SEED_NOW
+      )
+    ).toThrow(/Source reference "usage_meridians_001" is already assigned to different usage/);
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
+    expect(repository.getTokenBalance("cust_meridians")).toBe(248800);
+  });
+
+  it("rejects a debit that would make the balance negative before any write", () => {
+    const { repository, storage } = createInMemoryRepository();
+    const before = storage.getItem(STORAGE_KEY);
+    expect(() =>
+      repository.recordUsageDebit(
+        { ...usageInput, tokenQuantity: 300000 },
+        SEED_NOW
+      )
+    ).toThrow(/Insufficient token balance/);
+    const persisted = readPersistedStore(storage);
+    expect(persisted.usageRecords).toHaveLength(0);
+    expect(persisted.ledgerTransactions).toHaveLength(1);
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
+  });
+
+  it("rejects an unknown customer", () => {
+    const { repository } = createInMemoryRepository();
+    expect(() =>
+      repository.recordUsageDebit(
+        { ...usageInput, customerId: "cust_missing" },
+        SEED_NOW
+      )
+    ).toThrow(/does not exist/);
+  });
+
+  it("rejects a customer without an active prepaid arrangement", () => {
+    const { repository } = createInMemoryRepository();
+    expect(() =>
+      repository.recordUsageDebit(
+        { ...usageInput, customerId: "cust_northwind" },
+        SEED_NOW
+      )
+    ).toThrow(/does not have an active prepaid arrangement/);
+  });
+
+  it("rejects an unknown agent product", () => {
+    const { repository } = createInMemoryRepository();
+    expect(() =>
+      repository.recordUsageDebit(
+        { ...usageInput, agentProductId: "agent_missing" },
+        SEED_NOW
+      )
+    ).toThrow(/does not exist/);
+  });
+});
+
+describe("addManualAdjustment", () => {
+  const adjustmentInput = {
+    customerId: "cust_meridians",
+    amountTokens: -500,
+    reference: "adj_meridians_001",
+    reason: "Correction for over-credited balance.",
+  };
+
+  it("appends a positive adjustment", () => {
+    const { repository } = createInMemoryRepository();
+    const transaction = repository.addManualAdjustment(
+      { ...adjustmentInput, amountTokens: 500 },
+      SEED_NOW
+    );
+    expect(transaction.kind).toBe("manual_adjustment");
+    expect(transaction.amountTokens).toBe(500);
+    expect(repository.getTokenBalance("cust_meridians")).toBe(250500);
+  });
+
+  it("appends a negative adjustment", () => {
+    const { repository } = createInMemoryRepository();
+    const transaction = repository.addManualAdjustment(
+      adjustmentInput,
+      SEED_NOW
+    );
+    expect(transaction.amountTokens).toBe(-500);
+    expect(repository.getTokenBalance("cust_meridians")).toBe(249500);
+  });
+
+  it("rejects a zero amount without writing", () => {
+    const { repository, storage } = createInMemoryRepository();
+    const before = storage.getItem(STORAGE_KEY);
+    expect(() =>
+      repository.addManualAdjustment(
+        { ...adjustmentInput, amountTokens: 0 },
+        SEED_NOW
+      )
+    ).toThrow(/must be non-zero/);
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
+  });
+
+  it("rejects an adjustment that would make the balance negative", () => {
+    const { repository, storage } = createInMemoryRepository();
+    const before = storage.getItem(STORAGE_KEY);
+    expect(() =>
+      repository.addManualAdjustment(
+        { ...adjustmentInput, amountTokens: -300000 },
+        SEED_NOW
+      )
+    ).toThrow(/Insufficient token balance/);
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
+  });
+
+  it("rejects a missing reason or reference", () => {
+    const { repository } = createInMemoryRepository();
+    expect(() =>
+      repository.addManualAdjustment(
+        { ...adjustmentInput, reason: "   " },
+        SEED_NOW
+      )
+    ).toThrow(/reason is required/);
+    expect(() =>
+      repository.addManualAdjustment(
+        { ...adjustmentInput, reference: "" },
+        SEED_NOW
+      )
+    ).toThrow(/reference is required/);
+  });
+});
+
+describe("reverseTransaction", () => {
+  const openingCreditId = "txn_opening_arr_meridians_prepaid";
+  const reversalInput = {
+    customerId: "cust_meridians",
+    transactionId: openingCreditId,
+    reference: "rev_meridians_001",
+    reason: "Reversing the opening credit.",
+  };
+
+  it("appends one reversal negating the full target amount", () => {
+    const { repository } = createInMemoryRepository();
+    const transaction = repository.reverseTransaction(reversalInput, SEED_NOW);
+    expect(transaction.kind).toBe("reversal");
+    expect(transaction.amountTokens).toBe(-250000);
+    if (transaction.kind === "reversal") {
+      expect(transaction.reversesTransactionId).toBe(openingCreditId);
+    }
+    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
+  });
+
+  it("rejects a second reversal of the same target", () => {
+    const { repository } = createInMemoryRepository();
+    repository.reverseTransaction(reversalInput, SEED_NOW);
+    expect(() =>
+      repository.reverseTransaction(reversalInput, SEED_NOW)
+    ).toThrow(/has already been reversed/);
+  });
+
+  it("rejects a reversal-of-reversal", () => {
+    const { repository } = createInMemoryRepository();
+    const reversal = repository.reverseTransaction(reversalInput, SEED_NOW);
+    expect(() =>
+      repository.reverseTransaction(
+        {
+          customerId: "cust_meridians",
+          transactionId: reversal.id,
+          reference: "rev_meridians_002",
+          reason: "Trying to reverse the reversal.",
+        },
+        SEED_NOW
+      )
+    ).toThrow(/is a reversal and cannot be reversed/);
+  });
+
+  it("rejects a reversal that would make the balance negative", () => {
+    const { repository } = createInMemoryRepository();
+    repository.recordUsageDebit(
+      {
+        customerId: "cust_meridians",
+        agentProductId: "agent_sentinel",
+        tokenQuantity: 240000,
+        sourceReference: "usage_meridians_big",
+      },
+      SEED_NOW
+    );
+    expect(() =>
+      repository.reverseTransaction(reversalInput, SEED_NOW)
+    ).toThrow(/Insufficient token balance/);
+  });
+
+  it("rejects a missing target", () => {
+    const { repository } = createInMemoryRepository();
+    expect(() =>
+      repository.reverseTransaction(
+        { ...reversalInput, transactionId: "txn_missing" },
+        SEED_NOW
+      )
+    ).toThrow(/does not exist/);
+  });
+});
+
+describe("deleteCustomer ledger cascade", () => {
+  it("removes ledger and usage records in the same write", () => {
+    const { repository, storage } = createInMemoryRepository();
+    repository.recordUsageDebit(
+      {
+        customerId: "cust_meridians",
+        agentProductId: "agent_sentinel",
+        tokenQuantity: 1200,
+        sourceReference: "usage_meridians_001",
+      },
+      SEED_NOW
+    );
+    repository.deleteCustomer("cust_meridians");
+    const persisted = readPersistedStore(storage);
+    expect(
+      persisted.ledgerTransactions.some(
+        (t) => t.customerId === "cust_meridians"
+      )
+    ).toBe(false);
+    expect(
+      persisted.usageRecords.some((u) => u.customerId === "cust_meridians")
+    ).toBe(false);
+    expect(repository.getTokenBalance("cust_meridians")).toBe(0);
   });
 });

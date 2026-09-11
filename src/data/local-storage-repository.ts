@@ -30,13 +30,18 @@ import {
   type CommercialArrangementInput,
 } from "@/domain/commercial-rules";
 import {
+  applyManualAdjustment,
   assertNoNegativeBalance,
   creditGrantTransactionId,
   deriveTokenBalance,
   isLowBalance,
+  normalizeUsageFingerprint,
   openingCreditReference,
   openingCreditTransactionId,
+  recordUsage,
+  reverseTransaction as applyReversal,
   validateLedgerTransaction,
+  validateUsageIdempotency,
 } from "@/domain/ledger-rules";
 import { buildSeedStore } from "@/data/seed-data";
 
@@ -243,6 +248,57 @@ export interface HiveRepository {
       amountTokens: number;
       reference: string;
       reason?: string;
+    },
+    occurredAt: string
+  ): LedgerTransaction;
+  /**
+   * Record an atomic usage debit: one {@link UsageRecord} plus one linked
+   * `usage_debit` ledger transaction in a single write (D-08, USGE-01).
+   * Re-submitting the same source reference with an identical normalized
+   * fingerprint returns the existing pair without writing; reusing the
+   * reference with any differing fingerprint field throws a descriptive
+   * conflict error naming the reference (D-09, USGE-02). A debit that would
+   * make the derived balance negative is rejected before any write (D-03).
+   */
+  recordUsageDebit(
+    input: {
+      customerId: string;
+      agentProductId: string;
+      tokenQuantity: number;
+      sourceReference: string;
+      reason?: string;
+    },
+    occurredAt: string
+  ): { usage: UsageRecord; transaction: LedgerTransaction };
+  /**
+   * Append exactly one immutable `manual_adjustment` transaction with a
+   * required reason and reference (D-06, LEDG-04). The amount must be a
+   * non-zero signed whole-token value, and an adjustment that would make the
+   * derived balance negative is rejected before any write.
+   */
+  addManualAdjustment(
+    input: {
+      customerId: string;
+      amountTokens: number;
+      reference: string;
+      reason: string;
+    },
+    occurredAt: string
+  ): LedgerTransaction;
+  /**
+   * Append exactly one immutable `reversal` transaction that negates the full
+   * amount of its target exactly once, with a required reason and reference
+   * (D-05, LEDG-04). Rejects a missing target, a target from a different
+   * customer, a reversal-of-reversal, a second reversal of the same target,
+   * and any reversal that would make the derived balance negative — all before
+   * any write.
+   */
+  reverseTransaction(
+    input: {
+      customerId: string;
+      transactionId: string;
+      reference: string;
+      reason: string;
     },
     occurredAt: string
   ): LedgerTransaction;
@@ -717,6 +773,12 @@ export class LocalStorageRepository implements HiveRepository {
       activityEvents: store.activityEvents.filter(
         (event) => event.customerId !== id
       ),
+      ledgerTransactions: store.ledgerTransactions.filter(
+        (transaction) => transaction.customerId !== id
+      ),
+      usageRecords: store.usageRecords.filter(
+        (usage) => usage.customerId !== id
+      ),
     });
   }
 
@@ -1125,6 +1187,122 @@ export class LocalStorageRepository implements HiveRepository {
       ledgerTransactions: [...store.ledgerTransactions, transaction],
     });
     return transaction;
+  }
+
+  recordUsageDebit(
+    input: {
+      customerId: string;
+      agentProductId: string;
+      tokenQuantity: number;
+      sourceReference: string;
+      reason?: string;
+    },
+    occurredAt: string
+  ): { usage: UsageRecord; transaction: LedgerTransaction } {
+    const store = this.read();
+    const customerId = input.customerId.trim();
+    if (!store.customers.some((c) => c.id === customerId)) {
+      throw new Error(`Customer with id "${customerId}" does not exist`);
+    }
+    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    if (!active || active.model !== "prepaid") {
+      throw new Error(
+        `Customer "${customerId}" does not have an active prepaid arrangement.`
+      );
+    }
+    const agentProductId = input.agentProductId.trim();
+    if (!store.agentProducts.some((p) => p.id === agentProductId)) {
+      throw new Error(
+        `Agent product with id "${agentProductId}" does not exist`
+      );
+    }
+
+    const fingerprint = normalizeUsageFingerprint({
+      customerId,
+      agentProductId,
+      sourceReference: input.sourceReference,
+      occurredAt,
+      tokenQuantity: input.tokenQuantity,
+    });
+    if (!fingerprint) {
+      throw new Error(
+        "Usage requires a customer, agent product, positive whole token quantity, canonical ISO occurredAt, and a source reference."
+      );
+    }
+
+    // Idempotency (D-09, USGE-02): look up the existing usage record by exact
+    // sourceReference across the whole store before any balance validation or
+    // write. An exact replay returns the existing pair without calling
+    // write(); a conflicting reuse throws a descriptive error.
+    const existing = store.usageRecords.find(
+      (usage) => usage.sourceReference === fingerprint.sourceReference
+    );
+    if (existing) {
+      validateUsageIdempotency(existing, fingerprint);
+      const existingTransaction = store.ledgerTransactions.find(
+        (transaction) => transaction.id === existing.ledgerTransactionId
+      );
+      if (!existingTransaction) {
+        throw new Error(
+          `Usage record "${existing.id}" is missing its linked ledger transaction.`
+        );
+      }
+      return { usage: existing, transaction: existingTransaction };
+    }
+
+    const result = recordUsage(store, input, occurredAt);
+    this.write(result.store);
+    return { usage: result.usage, transaction: result.transaction };
+  }
+
+  addManualAdjustment(
+    input: {
+      customerId: string;
+      amountTokens: number;
+      reference: string;
+      reason: string;
+    },
+    occurredAt: string
+  ): LedgerTransaction {
+    const store = this.read();
+    const customerId = input.customerId.trim();
+    if (!store.customers.some((c) => c.id === customerId)) {
+      throw new Error(`Customer with id "${customerId}" does not exist`);
+    }
+    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    if (!active || active.model !== "prepaid") {
+      throw new Error(
+        `Customer "${customerId}" does not have an active prepaid arrangement.`
+      );
+    }
+    const result = applyManualAdjustment(store, input, occurredAt);
+    this.write(result.store);
+    return result.transaction;
+  }
+
+  reverseTransaction(
+    input: {
+      customerId: string;
+      transactionId: string;
+      reference: string;
+      reason: string;
+    },
+    occurredAt: string
+  ): LedgerTransaction {
+    const store = this.read();
+    const customerId = input.customerId.trim();
+    if (!store.customers.some((c) => c.id === customerId)) {
+      throw new Error(`Customer with id "${customerId}" does not exist`);
+    }
+    const active = this.getCommercialSnapshot(customerId, occurredAt).active;
+    if (!active || active.model !== "prepaid") {
+      throw new Error(
+        `Customer "${customerId}" does not have an active prepaid arrangement.`
+      );
+    }
+    const result = applyReversal(store, input, occurredAt);
+    this.write(result.store);
+    return result.transaction;
   }
 
   updateWarningThreshold(
