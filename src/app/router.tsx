@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { RepositoryProvider } from "@/data/repository-context";
 import { apiRepository } from "@/data/api-repository";
 import { AboutPage } from "@/features/about/pages/AboutPage";
+import { DemoRequestsPage } from "@/features/demo-requests/pages/DemoRequestsPage";
+import { DemoRequestDetailPage } from "@/features/demo-requests/pages/DemoRequestDetailPage";
 import { AgentCatalogPage } from "@/features/agents/pages/AgentCatalogPage";
 import { AgentDetailPage } from "@/features/agents/pages/AgentDetailPage";
 import { CustomersPage } from "@/features/customers/pages/CustomersPage";
@@ -75,6 +77,22 @@ export const router = createBrowserRouter([
     element: (
       <RepositoryProvider repository={apiRepository}>
         {withLayout(<CustomerProfilePage />)}
+      </RepositoryProvider>
+    ),
+  },
+  {
+    path: "/demo-requests",
+    element: (
+      <RepositoryProvider repository={apiRepository}>
+        {withLayout(<DemoRequestsPage />)}
+      </RepositoryProvider>
+    ),
+  },
+  {
+    path: "/demo-requests/:requestId",
+    element: (
+      <RepositoryProvider repository={apiRepository}>
+        {withLayout(<DemoRequestDetailPage />)}
       </RepositoryProvider>
     ),
   },

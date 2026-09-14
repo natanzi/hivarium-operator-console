@@ -894,3 +894,12 @@ test.describe("Hivarium Operator Console E2E", () => {
         await expect(reversedBadge).toBeVisible();
     });
 });
+
+test.describe("Demo Requests", () => {
+    test("lists an empty evaluation queue after reset", async ({ page }) => {
+        await page.goto("/demo-requests");
+        await expect(page.getByTestId("page-title")).toHaveText("Demo Requests");
+        await expect(page.getByTestId("demo-requests-empty")).toBeVisible();
+        await expect(page.getByTestId("nav-demo-requests")).toBeVisible();
+    });
+});

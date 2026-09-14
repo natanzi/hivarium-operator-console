@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Boxes, Info, LogOut, ShieldAlert, Users } from "lucide-react";
+import { Boxes, ClipboardList, Info, LogOut, ShieldAlert, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,6 +27,7 @@ export interface NavLink {
 
 export const NAV_LINKS: NavLink[] = [
   { to: "/customers", label: "Customers", icon: Users },
+  { to: "/demo-requests", label: "Demo Requests", icon: ClipboardList },
   { to: "/agents", label: "Agent Catalog", icon: Boxes },
   { to: "/settings/about", label: "About", icon: Info },
 ];

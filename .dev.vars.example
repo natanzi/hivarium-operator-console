@@ -5,6 +5,13 @@ LICENSE_SERVICE_TOKEN=local-license-token
 PORTAL_SERVICE_TOKEN=local-portal-outbound-token
 # PORTAL_CALLER_TOKEN must equal Customer Portal OPERATOR_SERVICE_TOKEN.
 PORTAL_CALLER_TOKEN=local-portal-inbound-token
+# LANDING_CALLER_TOKEN must equal Landing OPERATOR_DEMO_INTAKE_TOKEN.
+LANDING_CALLER_TOKEN=local-landing-inbound-token
+OPERATOR_NOTIFY_EMAIL=operators@hivarium.example
+EMAIL_FROM_ADDRESS=noreply@hivarium.example
+# Use test://memory for deterministic local tests. Production: transactional provider key.
+EMAIL_PROVIDER_API_KEY=test://memory
+# EMAIL_PROVIDER_URL=https://api.resend.com/emails
 # Local-only URL overrides. Never set in production; production uses service bindings.
 # LICENSE_SERVICE_URL=http://127.0.0.1:8787
 # CUSTOMER_PORTAL_SERVICE_URL=http://127.0.0.1:8789

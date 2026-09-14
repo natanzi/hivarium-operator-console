@@ -127,6 +127,25 @@ export class PortalAdapter {
         return this.toCustomerRequest(res.request);
     }
 
+    async provisionMembership(
+        customerId: string,
+        email: string,
+        body: {
+            displayName: string;
+            role: string;
+            status: string;
+            demoExpiresAt: string;
+            correlationId: string;
+            idempotencyKey: string;
+        },
+    ): Promise<{ membershipId: string; replayed?: boolean }> {
+        const encodedEmail = encodeURIComponent(email);
+        return this.fetch<{ membershipId: string; replayed?: boolean }>(
+            `/service/v1/customers/${encodeURIComponent(customerId)}/memberships/${encodedEmail}`,
+            { method: "PUT", body: JSON.stringify(body) },
+        );
+    }
+
     async recordDecision(
         requestId: string,
         req: {

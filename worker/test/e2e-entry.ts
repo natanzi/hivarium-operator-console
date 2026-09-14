@@ -103,6 +103,22 @@ async function e2eResetInterceptApi(
     );
   }
 
+  const demoTables = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'demo_requests'",
+  ).first<{ name: string }>();
+  if (demoTables) {
+    await env.DB.exec(`
+      DROP TRIGGER IF EXISTS demo_request_events_no_update;
+      DROP TRIGGER IF EXISTS demo_request_events_no_delete;
+      DELETE FROM demo_email_outbox;
+      DELETE FROM demo_provisioning_jobs;
+      DELETE FROM demo_request_events;
+      DELETE FROM demo_requests;
+      CREATE TRIGGER IF NOT EXISTS demo_request_events_no_update BEFORE UPDATE ON demo_request_events BEGIN SELECT RAISE(ABORT, 'demo_request_events are append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS demo_request_events_no_delete BEFORE DELETE ON demo_request_events BEGIN SELECT RAISE(ABORT, 'demo_request_events are append-only'); END;
+    `);
+  }
+
   for (const stmt of RESET_STATEMENTS) {
     await env.DB.prepare(stmt).run();
   }

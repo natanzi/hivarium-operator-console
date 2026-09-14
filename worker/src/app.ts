@@ -81,6 +81,7 @@ import {
   type UsagePeriod,
 } from "../../src/domain/ledger-rules";
 import { handleLicensesApi, handleRequestsApi } from "./api-extensions";
+import { handleLandingDemoIntake, handleOperatorDemoApi } from "./demo/http";
 
 /**
  * Production environment bindings (D-01, D-03). This is the complete and
@@ -95,6 +96,13 @@ export interface Env {
   LICENSE_SERVICE_TOKEN: string;
   PORTAL_SERVICE_TOKEN: string;
   PORTAL_CALLER_TOKEN: string;
+  /** Inbound Landing site token for POST /service/v1/demo-requests. */
+  LANDING_CALLER_TOKEN?: string;
+  /** Operator notification recipient for demo intake. */
+  OPERATOR_NOTIFY_EMAIL?: string;
+  EMAIL_PROVIDER_API_KEY?: string;
+  EMAIL_FROM_ADDRESS?: string;
+  EMAIL_PROVIDER_URL?: string;
   /** Local-only origin for License Service. Never set in production. */
   LICENSE_SERVICE_URL?: string;
   /** Local-only origin for Customer Portal. Never set in production. */
@@ -1352,6 +1360,10 @@ async function route(
     throw new ApiError(404, "not-found", "Unknown API route.");
   }
 
+  if (resource === "demo-requests") {
+    return handleOperatorDemoApi(request, env, url, segments, identity);
+  }
+
   if (resource === "customers") {
     // Inject requests/licenses logic early
     if (segments.length >= 4 && segments[3] === "requests") {
@@ -1469,6 +1481,18 @@ async function handleService(request: Request, env: Env, url: URL): Promise<Resp
 
   if (segments[0] !== "service") {
     return errorResponse(404, "not-found", "Unknown API route.");
+  }
+
+  if (segments[1] === "v1" && segments[2] === "demo-requests" && segments.length === 3 && method === "POST") {
+    try {
+      return await handleLandingDemoIntake(request, env);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return errorResponse(error.status, error.code, error.message);
+      }
+      const message = error instanceof Error ? error.message : "Unexpected server error.";
+      return errorResponse(500, "internal-error", message);
+    }
   }
 
   if (!env.PORTAL_CALLER_TOKEN) {

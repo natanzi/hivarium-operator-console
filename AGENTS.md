@@ -17,6 +17,7 @@ This service owns:
 - agent catalog metadata used by customer operations;
 - customer-to-agent access grants and their lifecycle;
 - operator decisions and immutable audit history;
+- demo/evaluation request intake, review, provisioning orchestration, and email outbox;
 - the private operator UI and its API.
 
 This service does not own:
@@ -47,6 +48,7 @@ This service does not own:
 - Verify Access JWT signature, issuer, audience, and the exact authorized operator identity before route logic.
 - Missing or invalid identity fails closed.
 - Portal service authentication must be a separate explicit service principal; do not weaken human Access checks or blindly trust Service Bindings.
+- Landing demo intake uses `LANDING_CALLER_TOKEN` on `POST /service/v1/demo-requests`. Ignore `X-Service-Name`. Missing tokens fail closed.
 - Every mutation validates a typed DTO, runs shared domain rules, writes authoritative changes and an immutable audit entry atomically.
 - Customer archive replaces destructive delete. Archived customers remain readable and retain contracts, access, ledger, usage, and audit history.
 - Balances are derived from immutable transactions; never introduce a mutable balance counter as authority.

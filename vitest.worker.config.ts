@@ -16,7 +16,7 @@ const workerRoot = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      wrangler: { configPath: "./wrangler.jsonc" },
+      wrangler: { configPath: "./wrangler.vitest.jsonc" },
       // The bundled workerd binary in this container supports dates up to
       // 2026-08-22; pin the test runtime so local runs do not depend on the
       // deployment compatibility date.
