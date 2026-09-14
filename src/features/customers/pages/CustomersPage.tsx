@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RotateCcw, Search, UserPlus } from "lucide-react";
+import { Search, UserPlus } from "lucide-react";
 
 import {
   CUSTOMER_STATUS_LABELS,
-  PLAN_LABELS,
   SEED_NOW,
   STATUS_BADGE_CLASS,
 } from "@/data/seed-data";
-import { buildSeedStore } from "@/data/seed-data";
-import { createInMemoryRepository } from "@/data/local-storage-repository";
 import { useRepository } from "@/data/repository-context";
 import { formatDate } from "@/lib/format";
 import type {
@@ -389,8 +386,6 @@ export function CustomersPage() {
             : "No customers yet."
         }
       />
-
-      <ResetData onReset={() => void load()} />
     </div>
   );
 }
@@ -470,63 +465,8 @@ function StatusPill({
           ? "border-primary bg-primary text-primary-foreground"
           : "bg-card text-muted-foreground border hover:border-primary/40 hover:text-foreground"
       )}
-    >
-      {label}
-    </button>
-  );
-}
-
-function ResetData({ onReset }: { onReset: () => void }) {
-  const [confirmed, setConfirmed] = useState(false);
-  const [lastReset, setLastReset] = useState<string | null>(null);
-
-  const handleReset = async () => {
-    if (!confirmed) {
-      setConfirmed(true);
-      window.setTimeout(() => setConfirmed(false), 4000);
-      return;
-    }
-    const seeded = createInMemoryRepository();
-    await seeded.repository.reset();
-    const fresh = buildSeedStore();
-    try {
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(
-          "hivarium.operator-console.store.v1",
-          JSON.stringify(fresh)
-        );
-      }
-    } catch {
-      /* localStorage unavailable – reset still works in-memory */
-    }
-    // Force the table to re-read by re-running the repository read.
-    setLastReset(new Date().toISOString());
-    setConfirmed(false);
-    onReset();
-  };
-
-  return (
-    <div className="mt-2 flex items-center justify-between border-t pt-4 text-xs">
-      <p className="text-muted-foreground">
-        Data is seeded on first load and persists to this browser&apos;s
-        localStorage.
-        {lastReset ? (
-          <span className="ml-1 text-sage">Reset at {formatDate(lastReset)}.</span>
-        ) : null}
-      </p>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => void handleReset()}
-        data-testid="reset-data-button"
-        className={cn(
-          "text-muted-foreground hover:text-destructive",
-          confirmed && "text-destructive hover:text-destructive"
-        )}
       >
-        <RotateCcw className="size-4" />
-        {confirmed ? "Click again to confirm" : "Reset sample data"}
-      </Button>
-    </div>
-  );
-}
+        {label}
+      </button>
+    );
+  }

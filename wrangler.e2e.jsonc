@@ -1,0 +1,41 @@
+{
+  // E2E-only wrangler config: identical to the production wrangler.jsonc
+  // except that `main` points at the test-only Worker entrypoint and
+  // E2E_TEST_AUTH is enabled. Never used for deployment; only consumed by
+  // `npm run test:e2e` (see playwright.config.ts).
+  "name": "hivarium-operator-console-e2e-local",
+  "main": "worker/test/e2e-entry.ts",
+  "compatibility_date": "2024-05-03",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  // D1 durable store owned by the Worker API (D-01). The database_id below is
+  // a local placeholder; replace it with the real D1 database id
+  // (`wrangler d1 create hivarium-operator-console`) before deploying.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hivarium-operator-console",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  // Cloudflare Access JWT verification configuration (D-03). These are
+  // non-secret configuration values; override them per environment before
+  // deploying. The Access application AUD and team domain are public values
+  // carried inside the JWT itself.
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "example.cloudflareaccess.com",
+    "ACCESS_AUD": "replace-with-access-application-aud",
+    "AUTHORIZED_OPERATOR_EMAIL": "operator@hivarium.test",
+    // E2E-only: enables the deterministic test identity and the
+    // POST /api/e2e/reset reseed route in worker/test/e2e-entry.ts.
+    "E2E_TEST_AUTH": "true"
+  },
+  // Resolve the SPA's "@/*" import alias inside the Worker bundle so the
+  // shared domain rules and deterministic seed can be imported by relative
+  // paths from worker/ (D-07, D-11).
+  "alias": {
+    "@": "./src"
+  }
+}
