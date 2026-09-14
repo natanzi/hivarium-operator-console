@@ -95,6 +95,10 @@ export interface Env {
   LICENSE_SERVICE_TOKEN: string;
   PORTAL_SERVICE_TOKEN: string;
   PORTAL_CALLER_TOKEN: string;
+  /** Local-only origin for License Service. Never set in production. */
+  LICENSE_SERVICE_URL?: string;
+  /** Local-only origin for Customer Portal. Never set in production. */
+  CUSTOMER_PORTAL_SERVICE_URL?: string;
   /** Access team domain, e.g. `example.cloudflareaccess.com`. */
   ACCESS_TEAM_DOMAIN: string;
   /** Access application AUD carried in the JWT `aud` claim. */
@@ -1467,9 +1471,12 @@ async function handleService(request: Request, env: Env, url: URL): Promise<Resp
     return errorResponse(404, "not-found", "Unknown API route.");
   }
 
-  // Auth middleware for Service-to-Service portal endpoints
+  if (!env.PORTAL_CALLER_TOKEN) {
+    return errorResponse(503, "service_unavailable", "PORTAL_CALLER_TOKEN is not configured.");
+  }
   const authHeader = request.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.split(" ")[1] !== env.PORTAL_CALLER_TOKEN) {
+  const presented = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
+  if (!presented || presented !== env.PORTAL_CALLER_TOKEN) {
     return errorResponse(401, "unauthorized", "Invalid or missing service token.");
   }
 
@@ -1479,22 +1486,34 @@ async function handleService(request: Request, env: Env, url: URL): Promise<Resp
     const store = await loadCustomerStore(env.DB, customerId);
     const customer = store.customers.find((c) => c.id === customerId);
     if (!customer) {
-      return errorResponse(404, "not-found", `Customer "${customerId}" does not exist.`);
+      return errorResponse(404, "not-found", "Customer not found.");
     }
 
     const asOf = nowIso();
     const commercialState = projectCommercialState(store.commercialArrangements, asOf);
-    const activeGrants = store.agentAccessGrants.filter(g => resolveAgentAccessStatus(g, asOf) === "active");
-    const scheduledGrants = store.agentAccessGrants.filter(g => resolveAgentAccessStatus(g, asOf) === "scheduled");
+    const mapGrant = (g: (typeof store.agentAccessGrants)[number]) => ({
+      grantId: g.id,
+      agentProductId: g.agentProductId,
+      agentName: g.agentProductId,
+      category: null,
+      version: null,
+      status: resolveAgentAccessStatus(g, asOf),
+      startsAt: g.startsAt,
+      endsAt: g.endsAt,
+      licenseId: null,
+      deploymentId: null,
+    });
+    const activeGrants = store.agentAccessGrants.filter((g) => resolveAgentAccessStatus(g, asOf) === "active").map(mapGrant);
+    const scheduledGrants = store.agentAccessGrants.filter((g) => resolveAgentAccessStatus(g, asOf) === "scheduled").map(mapGrant);
 
-    let tokenBalance = undefined;
-    let warningState = undefined;
-
-    const activePrepaid = commercialState.active?.model === "prepaid" ? commercialState.active : undefined;
+    let tokenBalance: number | null = null;
+    let warningThresholdTokens: number | null = null;
+    const active = commercialState.active;
+    const activePrepaid = active?.model === "prepaid" ? active : undefined;
     if (activePrepaid) {
       const statement = projectAccountStatement(store.ledgerTransactions, customerId);
       tokenBalance = statement.length > 0 ? statement[0].resultingBalanceTokens : 0;
-      warningState = activePrepaid.warningThresholdTokens !== null && tokenBalance <= activePrepaid.warningThresholdTokens;
+      warningThresholdTokens = activePrepaid.warningThresholdTokens;
     }
 
     let lastUpdated = customer.createdAt;
@@ -1503,21 +1522,35 @@ async function handleService(request: Request, env: Env, url: URL): Promise<Resp
       lastUpdated = store.activityEvents[0].occurredAt;
     }
 
-    const safeProfile = {
-      id: customer.id,
-      name: customer.name,
-      domain: customer.domain,
-      status: customer.status,
-    };
+    const features = store.featureEntitlements
+      .filter((entitlement) => entitlement.customerId === customerId)
+      .map((entitlement) => entitlement.feature);
 
     return json({
-      profile: safeProfile,
-      commercialModel: commercialState.active,
-      tokenBalance,
-      warningState,
-      activeGrants,
-      scheduledGrants,
-      featureEntitlements: store.featureEntitlements,
+      organization: {
+        customerId: customer.id,
+        name: customer.name,
+        status: customer.status,
+      },
+      commercial: active
+        ? {
+            model: active.model,
+            effectiveDate: active.effectiveFrom,
+            endDate: active.effectiveTo,
+            renewalDate: active.model === "monthly" ? active.renewsAt : null,
+          }
+        : null,
+      prepaid: activePrepaid
+        ? {
+            balanceTokens: tokenBalance,
+            warningThresholdTokens,
+          }
+        : null,
+      features,
+      access: {
+        active: activeGrants,
+        scheduled: scheduledGrants,
+      },
       lastUpdated,
     });
   }

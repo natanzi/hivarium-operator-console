@@ -15,12 +15,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 
+function isOpenDecisionStatus(status: string): boolean {
+    return status === "submitted" || status === "under_review";
+}
+
 export function RequestsTab({ customerId }: { customerId: string }) {
     const repo = useRepository();
     const [requests, setRequests] = useState<CustomerRequest[] | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    // Dialog state
     const [actionReq, setActionReq] = useState<{ id: string; type: string; status: string; customerId: string } | null>(null);
     const [actionOpen, setActionOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,7 +33,9 @@ export function RequestsTab({ customerId }: { customerId: string }) {
         try {
             const resp = await repo.listRequests(customerId);
             setRequests(resp);
+            setError(null);
         } catch (e) {
+            setRequests(null);
             setError("Failed to load requests");
         }
     };
@@ -51,30 +56,39 @@ export function RequestsTab({ customerId }: { customerId: string }) {
         setActionError(null);
 
         try {
-            const isRenewal = actionReq.type === "license_renewal" && actionReq.status === "approved";
-            let externalReference = undefined;
+            const isRenewalComplete = actionReq.type === "license_renewal" && actionReq.status === "completed";
+            let externalReference: string | undefined;
 
-            if (isRenewal) {
+            if (isRenewalComplete) {
                 try {
-                    // Step 1: Call License Service
-                    const lic = await repo.renewLicense(customerId, "placeholder-license-id", {
-                        idempotencyKey: Date.now().toString(),
-                        validUntil: new Date().toISOString()
+                    const detail = await repo.getRequest(customerId, actionReq.id);
+                    const licenseId = typeof detail.payload?.licenseId === "string" ? detail.payload.licenseId : undefined;
+                    if (!licenseId) {
+                        throw new Error("License renewal request is missing a license id.");
+                    }
+                    const validUntil = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+                    const lic = await repo.renewLicense(customerId, licenseId, {
+                        idempotencyKey: `renew-${actionReq.id}`,
+                        validUntil,
                     });
                     externalReference = lic.id;
-                } catch (e) {
-                    throw new Error("Failed to renew license. Request not marked completed.");
+                } catch (e: unknown) {
+                    const message = e instanceof Error ? e.message : "Failed to renew license. Request not marked completed.";
+                    throw new Error(message.startsWith("Failed to renew") || message.includes("missing")
+                        ? message
+                        : "Failed to renew license. Request not marked completed.");
                 }
             }
 
-            // Step 2: Portal Request Update
             try {
                 await repo.recordDecision(customerId, actionReq.id, {
                     status: actionReq.status,
-                    note: externalReference ? `License ${externalReference} renewed` : "Updated"
+                    note: externalReference ? `License ${externalReference} renewed` : "Updated",
+                    idempotencyKey: `decision-${actionReq.id}-${actionReq.status}`,
+                    externalReference,
                 });
             } catch (e) {
-                if (isRenewal && externalReference) {
+                if (isRenewalComplete && externalReference) {
                     throw new Error(`Partial failure! License ${externalReference} was renewed, but portal request update failed. Please retry.`);
                 }
                 throw new Error("Failed to record decision in portal.");
@@ -83,9 +97,10 @@ export function RequestsTab({ customerId }: { customerId: string }) {
             toast.success(`Request ${actionReq.status} successfully.`);
             setActionOpen(false);
             load();
-        } catch (e: any) {
-            setActionError(e.message || "Action failed.");
-            toast.error(e.message || "Action failed.");
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : "Action failed.";
+            setActionError(message);
+            toast.error(message);
         } finally {
             setIsSubmitting(false);
         }
@@ -107,11 +122,16 @@ export function RequestsTab({ customerId }: { customerId: string }) {
                     <div className="text-sm">{req.summary}</div>
                     <div className="text-xs text-slate-500">Submitted: {formatDate(req.submittedAt)}</div>
 
-                    {req.status === "pending" && (
+                    {isOpenDecisionStatus(req.status) && (
                         <div className="flex gap-2 mt-2">
                             <Button size="sm" onClick={() => handleActionClick(req, "approved")}>Approve</Button>
                             <Button size="sm" variant="outline" onClick={() => handleActionClick(req, "rejected")}>Reject</Button>
                             <Button size="sm" variant="ghost" onClick={() => handleActionClick(req, "needs_information")}>Needs Info</Button>
+                        </div>
+                    )}
+                    {req.type === "license_renewal" && req.status === "approved" && (
+                        <div className="flex gap-2 mt-2">
+                            <Button size="sm" onClick={() => handleActionClick(req, "completed")}>Complete renewal</Button>
                         </div>
                     )}
                 </div>
@@ -123,8 +143,8 @@ export function RequestsTab({ customerId }: { customerId: string }) {
                         <AlertDialogTitle>Confirm Decision</AlertDialogTitle>
                         <AlertDialogDescription>
                             Are you sure you want to mark this {actionReq?.type} request as <strong>{actionReq?.status}</strong>?
-                            {actionReq?.type === "license_renewal" && actionReq?.status === "approved" && (
-                                <span className="block mt-2">This will immediately issue a license renewal mutation to the License Service.</span>
+                            {actionReq?.type === "license_renewal" && actionReq?.status === "completed" && (
+                                <span className="block mt-2">This will issue a license renewal mutation to the License Service, then complete the portal request with the successor reference.</span>
                             )}
                         </AlertDialogDescription>
                     </AlertDialogHeader>

@@ -226,11 +226,19 @@ export interface AgentAccessGrant {
 export interface CustomerRequest {
   id: string;
   customerId: string;
-  type: "license_renewal" | "plan_change" | "additional_agent_access" | "token_credit_request" | "support_request";
-  status: "pending" | "approved" | "rejected" | "needs_information" | "completed";
+  type: "license_renewal" | "plan_change" | "additional_agent_access" | "token_credit" | "support";
+  status:
+    | "submitted"
+    | "under_review"
+    | "needs_information"
+    | "approved"
+    | "rejected"
+    | "completed"
+    | "cancelled";
   submittedAt: string;
   summary: string;
   history: Array<{ timestamp: string; status: string; actor: string; note?: string }>;
+  payload?: Record<string, unknown>;
   externalReference?: string;
 }
 
@@ -239,7 +247,7 @@ export interface LicenseDocument {
   customerId: string;
   productId: string;
   revision: number;
-  status: "active" | "suspended" | "revoked" | "expired";
+  status: "active" | "suspended" | "revoked" | "expired" | "draft" | "superseded";
   deploymentType: string;
   validFrom: string;
   validUntil: string | null;

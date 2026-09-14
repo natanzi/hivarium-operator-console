@@ -25,10 +25,18 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
     return body as Record<string, unknown>;
 }
 
+function portalAdapter(env: Env): PortalAdapter {
+    return new PortalAdapter(env.CUSTOMER_PORTAL_SERVICE, env.PORTAL_SERVICE_TOKEN, env.CUSTOMER_PORTAL_SERVICE_URL);
+}
+
+function licenseAdapter(env: Env): LicenseAdapter {
+    return new LicenseAdapter(env.LICENSE_SERVICE, env.LICENSE_SERVICE_TOKEN, env.LICENSE_SERVICE_URL);
+}
+
 export async function handleRequestsApi(request: Request, env: Env, segments: string[], identity: OperatorIdentity): Promise<Response> {
     const method = request.method;
     const customerId = segments[2];
-    const adapter = new PortalAdapter(env.CUSTOMER_PORTAL_SERVICE, env.PORTAL_SERVICE_TOKEN);
+    const adapter = portalAdapter(env);
 
     if (segments.length === 4 && method === "GET") {
         const list = await adapter.listRequests(customerId);
@@ -44,13 +52,23 @@ export async function handleRequestsApi(request: Request, env: Env, segments: st
     if (segments.length === 6 && segments[5] === "decision" && method === "POST") {
         const reqId = segments[4];
         const body = await readJson(request);
-        const status = body.status as any;
-        const note = body.note as string;
-        if (!["approved", "rejected", "needs_information"].includes(status)) {
-            throw new ApiError(400, "validation-error", "Invalid status");
+        const decision = String(body.decision ?? body.status ?? "");
+        const allowed = ["approved", "rejected", "needs_information", "under_review", "completed"];
+        if (!allowed.includes(decision)) {
+            throw new ApiError(400, "validation-error", "Invalid decision");
+        }
+        const idempotencyKey = String(body.idempotencyKey ?? "");
+        if (idempotencyKey.length < 8 || idempotencyKey.length > 128) {
+            throw new ApiError(400, "validation-error", "Missing or invalid idempotencyKey");
         }
 
-        const updated = await adapter.recordDecision(reqId, { status, note, operatorEmail: identity.email });
+        const updated = await adapter.recordDecision(reqId, {
+            decision: decision as "approved",
+            operatorNote: typeof body.note === "string" ? body.note : typeof body.operatorNote === "string" ? body.operatorNote : undefined,
+            customerVisibleMessage: typeof body.customerVisibleMessage === "string" ? body.customerVisibleMessage : undefined,
+            externalReference: typeof body.externalReference === "string" ? body.externalReference : undefined,
+            idempotencyKey,
+        });
 
         const before = await loadCustomerStore(env.DB, customerId);
         const audit = buildAuditEntry({
@@ -59,8 +77,8 @@ export async function handleRequestsApi(request: Request, env: Env, segments: st
             customerId,
             subjectType: "customer_request",
             subjectId: reqId,
-            summary: `Recorded ${status} decision for request.`,
-            after: { status, note },
+            summary: `Recorded ${decision} decision for request.`,
+            after: { decision, externalReference: body.externalReference ?? null },
             occurredAt: nowIso(),
         });
 
@@ -74,7 +92,7 @@ export async function handleRequestsApi(request: Request, env: Env, segments: st
 export async function handleLicensesApi(request: Request, env: Env, segments: string[], identity: OperatorIdentity): Promise<Response> {
     const method = request.method;
     const customerId = segments[2];
-    const adapter = new LicenseAdapter(env.LICENSE_SERVICE, env.LICENSE_SERVICE_TOKEN);
+    const adapter = licenseAdapter(env);
 
     if (segments.length === 4 && method === "GET") {
         const list = await adapter.listLicenses(customerId);
@@ -149,10 +167,10 @@ export async function handleLicensesApi(request: Request, env: Env, segments: st
         const before = await loadCustomerStore(env.DB, customerId);
         const audit = buildAuditEntry({
             identity,
-            action: action as any,
+            action: action as "license.renewed",
             customerId,
             subjectType: "license",
-            subjectId: licId,
+            subjectId: updated.id,
             summary: `${action} license.`,
             after: updated,
             occurredAt: nowIso(),

@@ -27,7 +27,7 @@ describe("RequestsTab", () => {
     };
 
     it("opens approval dialog and confirms", async () => {
-        repo.listRequests = vi.fn().mockResolvedValue([{ id: "req-1", type: "plan_change", status: "pending", summary: "Requesting plan change", submittedAt: MOCK_DATE }]);
+        repo.listRequests = vi.fn().mockResolvedValue([{ id: "req-1", type: "plan_change", status: "submitted", summary: "Requesting plan change", submittedAt: MOCK_DATE }]);
         repo.recordDecision = vi.fn().mockResolvedValue({});
 
         renderTab();
@@ -41,11 +41,11 @@ describe("RequestsTab", () => {
         const confirmBtn = screen.getByRole("button", { name: "Confirm approved" });
         await user.click(confirmBtn);
 
-        expect(repo.recordDecision).toHaveBeenCalledWith("cust-1", "req-1", { status: "approved", note: "Updated" });
+        expect(repo.recordDecision).toHaveBeenCalledWith("cust-1", "req-1", { status: "approved", note: "Updated", idempotencyKey: "decision-req-1-approved", externalReference: undefined });
     });
 
     it("cancel does not mutate and escapes safely", async () => {
-        repo.listRequests = vi.fn().mockResolvedValue([{ id: "req-2", type: "support_request", status: "pending", summary: "Support", submittedAt: MOCK_DATE }]);
+        repo.listRequests = vi.fn().mockResolvedValue([{ id: "req-2", type: "support", status: "submitted", summary: "Support", submittedAt: MOCK_DATE }]);
         repo.recordDecision = vi.fn();
 
         renderTab();
@@ -67,16 +67,17 @@ describe("RequestsTab", () => {
     });
 
     it("partial license-renewal failure shows inline error", async () => {
-        repo.listRequests = vi.fn().mockResolvedValue([{ id: "req-3", type: "license_renewal", status: "pending", summary: "Renew", submittedAt: MOCK_DATE }]);
+        repo.listRequests = vi.fn().mockResolvedValue([{ id: "req-3", type: "license_renewal", status: "approved", summary: "Renew", submittedAt: MOCK_DATE, payload: { licenseId: "lic-old" } }]);
+        repo.getRequest = vi.fn().mockResolvedValue({ id: "req-3", type: "license_renewal", status: "approved", payload: { licenseId: "lic-old" } });
         repo.renewLicense = vi.fn().mockResolvedValue({ id: "lic-999" });
         repo.recordDecision = vi.fn().mockRejectedValue(new Error("API Error"));
 
         renderTab();
 
-        const approveBtn = await screen.findByRole("button", { name: "Approve" });
-        await user.click(approveBtn);
+        const completeBtn = await screen.findByRole("button", { name: "Complete renewal" });
+        await user.click(completeBtn);
 
-        const confirmBtn = screen.getByRole("button", { name: "Confirm approved" });
+        const confirmBtn = screen.getByRole("button", { name: "Confirm completed" });
         await user.click(confirmBtn);
 
         // License Service succeeds (repo.renewLicense called) but portal request fails

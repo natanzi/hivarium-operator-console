@@ -594,7 +594,7 @@ export class ApiRepository implements HiveRepository {
     return request;
   }
 
-  async recordDecision(customerId: string, requestId: string, decision: { status: string; note: string }): Promise<CustomerRequest> {
+  async recordDecision(customerId: string, requestId: string, decision: { status: string; note: string; idempotencyKey?: string; externalReference?: string }): Promise<CustomerRequest> {
     const { request } = await this.request<{ request: CustomerRequest }>(
       `/api/customers/${encodeURIComponent(customerId)}/requests/${encodeURIComponent(requestId)}/decision`,
       { method: "POST", body: JSON.stringify(decision) }

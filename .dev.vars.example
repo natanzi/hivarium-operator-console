@@ -1,3 +1,10 @@
+# Directional service tokens (placeholders only). Never reuse a value bidirectionally.
+# LICENSE_SERVICE_TOKEN must equal License Service OPERATOR_CALLER_TOKEN.
 LICENSE_SERVICE_TOKEN=local-license-token
+# PORTAL_SERVICE_TOKEN must equal Customer Portal OPERATOR_CALLER_TOKEN.
 PORTAL_SERVICE_TOKEN=local-portal-outbound-token
+# PORTAL_CALLER_TOKEN must equal Customer Portal OPERATOR_SERVICE_TOKEN.
 PORTAL_CALLER_TOKEN=local-portal-inbound-token
+# Local-only URL overrides. Never set in production; production uses service bindings.
+# LICENSE_SERVICE_URL=http://127.0.0.1:8787
+# CUSTOMER_PORTAL_SERVICE_URL=http://127.0.0.1:8789

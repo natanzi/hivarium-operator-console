@@ -20,5 +20,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["worker/src", "src/domain", "src/data/seed-data.ts"]
+  "include": ["worker/src", "src/domain", "src/data/seed-data.ts"],
+  "exclude": ["worker/src/**/*.test.ts"]
 }
