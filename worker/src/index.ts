@@ -51,6 +51,7 @@ import {
   commercialTerminatedEventId,
   findConflictingAccessGrant,
   projectCommercialState,
+  reconcileCommercialLifecycle,
   resolveAgentAccessStatus,
   validateAgentAccessGrant,
   type AgentAccessGrantInput,
@@ -530,6 +531,48 @@ async function handleTerminateCommercial(
     (a) => a.id === arrangement.id
   );
   return json({ arrangement: terminated });
+}
+
+async function handleReconcileCommercial(
+  request: Request,
+  env: Env,
+  customerId: string,
+  identity: OperatorIdentity
+): Promise<Response> {
+  const body = await readJson(request);
+  const asOf =
+    typeof body.asOf === "string" && body.asOf.trim().length > 0
+      ? body.asOf.trim()
+      : nowIso();
+  if (Number.isNaN(Date.parse(asOf))) {
+    throw new ApiError(
+      400,
+      "validation-error",
+      "asOf must be a valid ISO-8601 timestamp."
+    );
+  }
+
+  const before = await loadCustomerStore(env.DB, customerId);
+  requireCustomer(before, customerId);
+
+  const result = reconcileCommercialLifecycle(before, customerId, asOf);
+  const diff = diffStores(before, result.store);
+  const audit = buildAuditEntry({
+    identity,
+    action: "commercial.lifecycle_reconciled",
+    customerId,
+    subjectType: "commercial_arrangement",
+    subjectId: customerId,
+    summary: `Reconciled commercial lifecycle at ${asOf}.`,
+    after: {
+      activeCount: result.store.commercialArrangements.filter(
+        (a) => a.customerId === customerId && a.status === "active"
+      ).length,
+    },
+    occurredAt: asOf,
+  });
+  await commitStoreDiff(env.DB, diff, audit);
+  return json({ customerId, asOf, changed: result.changed });
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,6 +1159,9 @@ async function handleCustomers(
       if (method === "POST") {
         return handleSaveCommercial(request, env, customerId, identity);
       }
+    }
+    if (rest.length === 3 && rest[2] === "reconcile" && method === "POST") {
+      return handleReconcileCommercial(request, env, customerId, identity);
     }
     if (rest.length === 4 && rest[3] === "terminate" && method === "POST") {
       return handleTerminateCommercial(

@@ -205,9 +205,7 @@ export interface HiveRepository {
   archiveCustomer(id: string): Promise<void>;
 
   // --- Legacy compatibility projections (derived from canonical records) ---
-  getSubscriptions(customerId: string): Promise<Subscription[]>;
   getFeatureEntitlements(customerId: string): Promise<FeatureEntitlement[]>;
-  getAgentLicenses(customerId: string): Promise<AgentLicense[]>;
 
   // --- Catalog -------------------------------------------------------------
   listAgentProducts(): Promise<AgentProduct[]>;

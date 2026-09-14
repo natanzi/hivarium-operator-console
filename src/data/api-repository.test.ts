@@ -387,6 +387,22 @@ describe("ApiRepository", () => {
     expect(result).toEqual(ARRANGEMENT);
   });
 
+  it("reconcileCommercialLifecycle POSTs asOf to the reconcile subpath", async () => {
+    const calls = mockFetch(() => new Response(null, { status: 204 }));
+    const repository = new ApiRepository();
+    await repository.reconcileCommercialLifecycle(
+      CUSTOMER_ID,
+      "2026-09-01T00:00:00.000Z"
+    );
+    expect(requestMethod(calls[0]!)).toBe("POST");
+    expect(calls[0]!.url).toBe(
+      `/api/customers/${CUSTOMER_ID}/commercial/reconcile`
+    );
+    expect(requestBody(calls[0]!)).toEqual({
+      asOf: "2026-09-01T00:00:00.000Z",
+    });
+  });
+
   // -- agent access grants -------------------------------------------------------
 
   it("getAgentAccessSnapshot reads the snapshot from GET /api/customers/:id/access", async () => {
@@ -628,9 +644,6 @@ describe("ApiRepository", () => {
 
   it.each([
     ["reset", async (r: ApiRepository) => r.reset()],
-    ["getSubscriptions", async (r: ApiRepository) => r.getSubscriptions(CUSTOMER_ID)],
-    ["getAgentLicenses", async (r: ApiRepository) => r.getAgentLicenses(CUSTOMER_ID)],
-    ["reconcileCommercialLifecycle", async (r: ApiRepository) => r.reconcileCommercialLifecycle(CUSTOMER_ID, "2026-09-01T00:00:00.000Z")],
   ])("%s throws UnsupportedOperationError without touching fetch", async (_name, invoke) => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);

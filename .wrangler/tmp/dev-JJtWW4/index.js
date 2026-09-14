@@ -489,6 +489,10 @@ function commercialCreatedEventId(arrangementId) {
   return `evt_${arrangementId}`;
 }
 __name(commercialCreatedEventId, "commercialCreatedEventId");
+function commercialEndedEventId(arrangementId) {
+  return `evt_${arrangementId}_ended`;
+}
+__name(commercialEndedEventId, "commercialEndedEventId");
 function commercialTerminatedEventId(arrangementId) {
   return `evt_${arrangementId}_terminated`;
 }
@@ -667,6 +671,126 @@ function applyAccessRevocation(store, input) {
   };
 }
 __name(applyAccessRevocation, "applyAccessRevocation");
+function reconcileCommercialLifecycle(store, customerId, asOf) {
+  let arrangements = store.commercialArrangements;
+  let grants = store.agentAccessGrants;
+  let events = store.activityEvents;
+  let changed = false;
+  const asOfMs = parseInstant(asOf);
+  const pending = arrangements.filter(
+    (a) => a.customerId === customerId && a.status === "scheduled" && parseInstant(a.effectiveFrom) <= asOfMs
+  ).sort((a, b) => parseInstant(a.effectiveFrom) - parseInstant(b.effectiveFrom));
+  for (const scheduled of pending) {
+    const currentActive = arrangements.find(
+      (a) => a.customerId === customerId && a.status === "active" && a.id !== scheduled.id
+    );
+    if (currentActive) {
+      arrangements = arrangements.map(
+        (a) => a.id === currentActive.id ? {
+          ...a,
+          status: "ended",
+          effectiveTo: scheduled.effectiveFrom,
+          replacedByArrangementId: scheduled.id
+        } : a
+      );
+      changed = true;
+    }
+    arrangements = arrangements.map(
+      (a) => a.id === scheduled.id ? { ...a, status: "active" } : a
+    );
+    changed = true;
+  }
+  const expired = arrangements.filter(
+    (a) => a.customerId === customerId && a.status === "active" && (a.model === "annual" ? parseInstant(a.endsAt) < asOfMs : a.effectiveTo !== null && parseInstant(a.effectiveTo) < asOfMs)
+  );
+  for (const arrangement of expired) {
+    arrangements = arrangements.map(
+      (a) => a.id === arrangement.id ? { ...a, status: "ended" } : a
+    );
+    changed = true;
+    const eventId = commercialEndedEventId(arrangement.id);
+    if (!events.some((e) => e.id === eventId)) {
+      events = [
+        ...events,
+        {
+          id: eventId,
+          occurredAt: asOf,
+          source: "system",
+          type: "commercial.ended",
+          customerId,
+          label: "Commercial arrangement ended by expiry.",
+          subjectId: arrangement.id,
+          resultingState: "ended"
+        }
+      ];
+      changed = true;
+    }
+  }
+  const hasActiveArrangement = arrangements.some(
+    (a) => a.customerId === customerId && resolveArrangementAsOf(a, asOf) === "active"
+  );
+  if (!hasActiveArrangement) {
+    const closed = arrangements.filter(
+      (a) => a.customerId === customerId && (a.status === "ended" || a.status === "terminated")
+    ).sort(
+      (a, b) => parseInstant(b.effectiveTo ?? b.effectiveFrom) - parseInstant(a.effectiveTo ?? a.effectiveFrom)
+    );
+    const trigger = closed[0];
+    const triggerEventId = trigger ? trigger.status === "terminated" ? commercialTerminatedEventId(trigger.id) : commercialEndedEventId(trigger.id) : void 0;
+    if (trigger && triggerEventId && !events.some((e) => e.id === triggerEventId)) {
+      events = [
+        ...events,
+        {
+          id: triggerEventId,
+          occurredAt: asOf,
+          source: "system",
+          type: trigger.status === "terminated" ? "commercial.terminated" : "commercial.ended",
+          customerId,
+          label: trigger.status === "terminated" ? "Commercial arrangement terminated." : "Commercial arrangement ended by expiry.",
+          subjectId: trigger.id,
+          resultingState: trigger.status
+        }
+      ];
+      changed = true;
+    }
+    const activeGrants = grants.filter(
+      (g) => g.customerId === customerId && resolveAgentAccessStatus(g, asOf) === "active"
+    );
+    for (const grant of activeGrants) {
+      const eventId = accessRevokedEventId(grant.id);
+      if (events.some((e) => e.id === eventId)) continue;
+      grants = grants.map(
+        (g) => g.id === grant.id ? { ...g, revokedAt: asOf, scheduledRevokeAt: null } : g
+      );
+      events = [
+        ...events,
+        {
+          id: eventId,
+          occurredAt: asOf,
+          source: "system",
+          type: "access.revoked",
+          customerId,
+          label: "Access revoked automatically because no commercial arrangement is active.",
+          subjectId: grant.id,
+          subjectId2: grant.agentProductId,
+          resultingState: "revoked",
+          causationId: triggerEventId
+        }
+      ];
+      changed = true;
+    }
+  }
+  return {
+    store: {
+      ...store,
+      commercialArrangements: arrangements,
+      agentAccessGrants: grants,
+      activityEvents: events
+    },
+    changed
+  };
+}
+__name(reconcileCommercialLifecycle, "reconcileCommercialLifecycle");
 
 // src/domain/ledger-rules.ts
 function parseInstant2(value) {
@@ -2878,6 +3002,38 @@ async function handleTerminateCommercial(request, env, customerId, arrangementId
   return json({ arrangement: terminated });
 }
 __name(handleTerminateCommercial, "handleTerminateCommercial");
+async function handleReconcileCommercial(request, env, customerId, identity) {
+  const body = await readJson(request);
+  const asOf = typeof body.asOf === "string" && body.asOf.trim().length > 0 ? body.asOf.trim() : nowIso();
+  if (Number.isNaN(Date.parse(asOf))) {
+    throw new ApiError(
+      400,
+      "validation-error",
+      "asOf must be a valid ISO-8601 timestamp."
+    );
+  }
+  const before = await loadCustomerStore(env.DB, customerId);
+  requireCustomer(before, customerId);
+  const result = reconcileCommercialLifecycle(before, customerId, asOf);
+  const diff = diffStores(before, result.store);
+  const audit = buildAuditEntry({
+    identity,
+    action: "commercial.lifecycle_reconciled",
+    customerId,
+    subjectType: "commercial_arrangement",
+    subjectId: customerId,
+    summary: `Reconciled commercial lifecycle at ${asOf}.`,
+    after: {
+      activeCount: result.store.commercialArrangements.filter(
+        (a) => a.customerId === customerId && a.status === "active"
+      ).length
+    },
+    occurredAt: asOf
+  });
+  await commitStoreDiff(env.DB, diff, audit);
+  return json({ customerId, asOf, changed: result.changed });
+}
+__name(handleReconcileCommercial, "handleReconcileCommercial");
 async function handleGetAccess(env, customerId) {
   const store = await loadCustomerStore(env.DB, customerId);
   requireCustomer(store, customerId);
@@ -3350,6 +3506,9 @@ async function handleCustomers(request, env, url, segments, identity) {
       if (method === "POST") {
         return handleSaveCommercial(request, env, customerId, identity);
       }
+    }
+    if (rest.length === 3 && rest[2] === "reconcile" && method === "POST") {
+      return handleReconcileCommercial(request, env, customerId, identity);
     }
     if (rest.length === 4 && rest[3] === "terminate" && method === "POST") {
       return handleTerminateCommercial(

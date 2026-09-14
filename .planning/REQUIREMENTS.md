@@ -43,12 +43,12 @@ Customer CRUD, confirmed local deletion, customer profiles, subscription/entitle
 
 ### Operational Safety
 
-- [ ] **SAFE-01**: Operator can archive a customer while retaining contracts, access history, ledger transactions, and usage records
-- [ ] **SAFE-02**: Destructive or balance-changing actions require clear confirmation naming the affected customer and consequence
-- [ ] **SAFE-03**: Real customer, contract, entitlement, and ledger records persist in durable server-owned storage rather than browser localStorage
-- [ ] **SAFE-04**: Server-side authorization restricts all customer and financial mutations to an authenticated operator
-- [ ] **SAFE-05**: System records an audit entry for commercial-model changes, agent-access changes, credit operations, and customer archival
-- [ ] **SAFE-06**: Automated tests verify commercial-model validation, ledger arithmetic, idempotent usage, permissions, and principal operator flows
+- [x] **SAFE-01**: Operator can archive a customer while retaining contracts, access history, ledger transactions, and usage records
+- [x] **SAFE-02**: Destructive or balance-changing actions require clear confirmation naming the affected customer and consequence
+- [x] **SAFE-03**: Real customer, contract, entitlement, and ledger records persist in durable server-owned storage rather than browser localStorage
+- [x] **SAFE-04**: Server-side authorization restricts all customer and financial mutations to an authenticated operator
+- [x] **SAFE-05**: System records an audit entry for commercial-model changes, agent-access changes, credit operations, and customer archival
+- [x] **SAFE-06**: Automated tests verify commercial-model validation, ledger arithmetic, idempotent usage, permissions, and principal operator flows
 
 ## v2 Requirements
 
@@ -100,12 +100,12 @@ Customer CRUD, confirmed local deletion, customer profiles, subscription/entitle
 | USGE-03 | Phase 2 | Pending |
 | USGE-04 | Phase 2 | Pending |
 | USGE-05 | Phase 2 | Pending |
-| SAFE-01 | Phase 3 | Pending |
-| SAFE-02 | Phase 2 | Pending |
-| SAFE-03 | Phase 3 | Pending |
-| SAFE-04 | Phase 3 | Pending |
-| SAFE-05 | Phase 3 | Pending |
-| SAFE-06 | Phase 3 | Pending |
+| SAFE-01 | Phase 3 | Verified |
+| SAFE-02 | Phase 2 | Verified |
+| SAFE-03 | Phase 3 | Verified |
+| SAFE-04 | Phase 3 | Verified |
+| SAFE-05 | Phase 3 | Verified |
+| SAFE-06 | Phase 3 | Verified |
 
 **Coverage:**
 - v1 requirements: 26 total

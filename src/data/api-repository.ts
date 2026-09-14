@@ -18,7 +18,6 @@
 import type {
   ActivityEvent,
   AgentAccessGrant,
-  AgentLicense,
   AgentProduct,
   CommercialArrangement,
   Customer,
@@ -26,7 +25,6 @@ import type {
   LedgerTransaction,
   LedgerTransactionKind,
   PrepaidCommercialArrangement,
-  Subscription,
   UsageRecord,
 } from "@/domain/types";
 import type {
@@ -232,10 +230,6 @@ export class ApiRepository implements HiveRepository {
 
   // --- Legacy compatibility projections ------------------------------------
 
-  async getSubscriptions(_customerId: string): Promise<Subscription[]> {
-    throw new UnsupportedOperationError("getSubscriptions");
-  }
-
   async getFeatureEntitlements(
     customerId: string
   ): Promise<FeatureEntitlement[]> {
@@ -243,10 +237,6 @@ export class ApiRepository implements HiveRepository {
       `/api/customers/${encodeURIComponent(customerId)}/features`
     );
     return entitlements;
-  }
-
-  async getAgentLicenses(_customerId: string): Promise<AgentLicense[]> {
-    throw new UnsupportedOperationError("getAgentLicenses");
   }
 
   // --- Catalog -------------------------------------------------------------
@@ -330,10 +320,13 @@ export class ApiRepository implements HiveRepository {
   }
 
   async reconcileCommercialLifecycle(
-    _customerId: string,
-    _asOf: string
+    customerId: string,
+    asOf: string
   ): Promise<void> {
-    throw new UnsupportedOperationError("reconcileCommercialLifecycle");
+    await this.requestVoid(
+      `/api/customers/${encodeURIComponent(customerId)}/commercial/reconcile`,
+      { method: "POST", body: JSON.stringify({ asOf }) }
+    );
   }
 
   // --- Agent access grants -------------------------------------------------
