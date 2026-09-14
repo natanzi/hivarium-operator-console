@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "hivarium-operator-console",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "7bda4b7e-da65-43b8-bae9-1cc965b63c22"
     }
   ],
   // Cloudflare Access JWT verification configuration (D-03). These are
@@ -21,9 +21,9 @@
   // deploying. The Access application AUD and team domain are public values
   // carried inside the JWT itself.
   "vars": {
-    "ACCESS_TEAM_DOMAIN": "example.cloudflareaccess.com",
-    "ACCESS_AUD": "replace-with-access-application-aud",
-    "AUTHORIZED_OPERATOR_EMAIL": "operator@hivarium.test"
+    "ACCESS_TEAM_DOMAIN": "damp-thunder-3785.cloudflareaccess.com",
+    "ACCESS_AUD": "e1b8f94ab08c140439a7d0bd57c0397b4a51caf21d646e6fc04059653c928f1a",
+    "AUTHORIZED_OPERATOR_EMAIL": "miladnatanzi@gmail.com"
   },
   // Resolve the SPA's "@/*" import alias inside the Worker bundle so the
   // shared domain rules and deterministic seed can be imported by relative
