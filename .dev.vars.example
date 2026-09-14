@@ -1,0 +1,3 @@
+LICENSE_SERVICE_TOKEN=local-license-token
+PORTAL_SERVICE_TOKEN=local-portal-outbound-token
+PORTAL_CALLER_TOKEN=local-portal-inbound-token

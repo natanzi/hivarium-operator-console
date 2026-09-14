@@ -62,6 +62,8 @@ import {
   modelPrimaryValue,
   TOUCH_TARGET,
 } from "@/features/customers/components/format";
+import { RequestsTab } from "@/features/customers/components/RequestsTab";
+import { LicensesTab } from "@/features/customers/components/LicensesTab";
 
 /** One asynchronous read of every projection the profile composes. */
 interface ProfileData {
@@ -332,6 +334,12 @@ export function CustomerProfilePage() {
           <TabsTrigger value="activity" data-testid="tab-activity">
             Activity
           </TabsTrigger>
+          <TabsTrigger value="requests" data-testid="tab-requests">
+            Requests
+          </TabsTrigger>
+          <TabsTrigger value="licenses" data-testid="tab-licenses">
+            Licenses
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="overview" data-testid="panel-overview">
           <OverviewPanel
@@ -391,6 +399,12 @@ export function CustomerProfilePage() {
             entries={data.auditEntries}
             customerName={data.customer?.name ?? ""}
           />
+        </TabsContent>
+        <TabsContent value="requests" data-testid="panel-requests">
+          <RequestsTab customerId={customerId} />
+        </TabsContent>
+        <TabsContent value="licenses" data-testid="panel-licenses">
+          <LicensesTab customerId={customerId} />
         </TabsContent>
       </Tabs>
 

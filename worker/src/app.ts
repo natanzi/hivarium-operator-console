@@ -80,6 +80,7 @@ import {
   type UsageAggregationFilter,
   type UsagePeriod,
 } from "../../src/domain/ledger-rules";
+import { handleLicensesApi, handleRequestsApi } from "./api-extensions";
 
 /**
  * Production environment bindings (D-01, D-03). This is the complete and
@@ -89,6 +90,11 @@ import {
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  LICENSE_SERVICE: Fetcher;
+  CUSTOMER_PORTAL_SERVICE: Fetcher;
+  LICENSE_SERVICE_TOKEN: string;
+  PORTAL_SERVICE_TOKEN: string;
+  PORTAL_CALLER_TOKEN: string;
   /** Access team domain, e.g. `example.cloudflareaccess.com`. */
   ACCESS_TEAM_DOMAIN: string;
   /** Access application AUD carried in the JWT `aud` claim. */
@@ -101,7 +107,7 @@ export interface Env {
 // Response and error helpers
 // ---------------------------------------------------------------------------
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -1343,6 +1349,13 @@ async function route(
   }
 
   if (resource === "customers") {
+    // Inject requests/licenses logic early
+    if (segments.length >= 4 && segments[3] === "requests") {
+      return handleRequestsApi(request, env, segments, identity);
+    }
+    if (segments.length >= 4 && segments[3] === "licenses") {
+      return handleLicensesApi(request, env, segments, identity);
+    }
     return handleCustomers(request, env, url, segments, identity);
   }
 
@@ -1405,10 +1418,10 @@ export function createApp<TEnv extends Env>(
       extensions.authenticate !== undefined
         ? await extensions.authenticate(request, env)
         : await authenticateRequest(request, {
-            teamDomain: env.ACCESS_TEAM_DOMAIN,
-            audience: env.ACCESS_AUD,
-            authorizedEmails: [env.AUTHORIZED_OPERATOR_EMAIL],
-          });
+          teamDomain: env.ACCESS_TEAM_DOMAIN,
+          audience: env.ACCESS_AUD,
+          authorizedEmails: [env.AUTHORIZED_OPERATOR_EMAIL],
+        });
     if (!auth.ok) {
       return errorResponse(401, "unauthorized", auth.reason);
     }
@@ -1435,12 +1448,81 @@ export function createApp<TEnv extends Env>(
       if (url.pathname.startsWith("/api/")) {
         return handleApi(request, env, url);
       }
+      if (url.pathname.startsWith("/service/")) {
+        return handleService(request, env, url);
+      }
       // For non-API routes on a SPA, ask the asset router for index.html.
       return env.ASSETS
         ? env.ASSETS.fetch(request)
         : fetch(new URL("/", request.url), request);
     },
   };
+}
+
+async function handleService(request: Request, env: Env, url: URL): Promise<Response> {
+  const method = request.method;
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (segments[0] !== "service") {
+    return errorResponse(404, "not-found", "Unknown API route.");
+  }
+
+  // Auth middleware for Service-to-Service portal endpoints
+  const authHeader = request.headers.get("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.split(" ")[1] !== env.PORTAL_CALLER_TOKEN) {
+    return errorResponse(401, "unauthorized", "Invalid or missing service token.");
+  }
+
+  if (segments[1] === "v1" && segments[2] === "customers" && segments[4] === "portal-view" && segments.length === 5) {
+    if (method !== "GET") return errorResponse(405, "method-not-allowed", "Method not allowed.");
+    const customerId = segments[3];
+    const store = await loadCustomerStore(env.DB, customerId);
+    const customer = store.customers.find((c) => c.id === customerId);
+    if (!customer) {
+      return errorResponse(404, "not-found", `Customer "${customerId}" does not exist.`);
+    }
+
+    const asOf = nowIso();
+    const commercialState = projectCommercialState(store.commercialArrangements, asOf);
+    const activeGrants = store.agentAccessGrants.filter(g => resolveAgentAccessStatus(g, asOf) === "active");
+    const scheduledGrants = store.agentAccessGrants.filter(g => resolveAgentAccessStatus(g, asOf) === "scheduled");
+
+    let tokenBalance = undefined;
+    let warningState = undefined;
+
+    const activePrepaid = commercialState.active?.model === "prepaid" ? commercialState.active : undefined;
+    if (activePrepaid) {
+      const statement = projectAccountStatement(store.ledgerTransactions, customerId);
+      tokenBalance = statement.length > 0 ? statement[0].resultingBalanceTokens : 0;
+      warningState = activePrepaid.warningThresholdTokens !== null && tokenBalance <= activePrepaid.warningThresholdTokens;
+    }
+
+    let lastUpdated = customer.createdAt;
+    if (store.activityEvents.length > 0) {
+      store.activityEvents.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+      lastUpdated = store.activityEvents[0].occurredAt;
+    }
+
+    const safeProfile = {
+      id: customer.id,
+      name: customer.name,
+      domain: customer.domain,
+      status: customer.status,
+    };
+
+    return json({
+      profile: safeProfile,
+      commercialModel: commercialState.active,
+      tokenBalance,
+      warningState,
+      activeGrants,
+      scheduledGrants,
+      featureEntitlements: store.featureEntitlements,
+      lastUpdated,
+    });
+  }
+
+  return errorResponse(404, "not-found", "Unknown API route.");
 }
 
 // Re-exported so the audit DTO type is available to consumers of the Worker.

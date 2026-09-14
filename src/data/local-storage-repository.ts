@@ -16,6 +16,8 @@ import type {
   Subscription,
   UsageRecord,
   AuditEntry,
+  CustomerRequest,
+  LicenseDocument,
 } from "@/domain/types";
 import { normalizeCustomerStatus, STORE_SCHEMA_VERSION } from "@/domain/types";
 import {
@@ -277,6 +279,19 @@ export interface HiveRepository {
   listActivityEvents(customerId: string): Promise<ActivityEvent[]>;
   /** Real audit trail for a customer */
   listAuditEntries(customerId: string): Promise<AuditEntry[]>;
+
+  // --- Requests and Licenses ------------------------------------------------
+  listRequests(customerId: string): Promise<CustomerRequest[]>;
+  getRequest(customerId: string, requestId: string): Promise<CustomerRequest>;
+  recordDecision(customerId: string, requestId: string, decision: { status: string; note: string }): Promise<CustomerRequest>;
+
+  listLicenses(customerId: string): Promise<LicenseDocument[]>;
+  issueLicense(customerId: string, req: any): Promise<LicenseDocument>;
+  renewLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
+  suspendLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
+  revokeLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
+  downloadLicense(customerId: string, licenseId: string): Promise<string>;
+
 
   // --- Prepaid token ledger ------------------------------------------------
   /**
@@ -1490,6 +1505,17 @@ export class LocalStorageRepository implements HiveRepository {
     }));
     return { customerId, rows, netTokensConsumed, perAgent };
   }
+
+  // --- Requests and Licenses (Dummy unsupported implementations) ---
+  async listRequests(_customerId: string): Promise<CustomerRequest[]> { return []; }
+  async getRequest(_customerId: string, _requestId: string): Promise<CustomerRequest> { throw new Error("not implemented"); }
+  async recordDecision(_customerId: string, _requestId: string, _decision: { status: string; note: string }): Promise<CustomerRequest> { throw new Error("not implemented"); }
+  async listLicenses(_customerId: string): Promise<LicenseDocument[]> { return []; }
+  async issueLicense(_customerId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
+  async renewLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
+  async suspendLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
+  async revokeLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
+  async downloadLicense(_customerId: string, _licenseId: string): Promise<string> { throw new Error("not implemented"); }
 }
 
 /**

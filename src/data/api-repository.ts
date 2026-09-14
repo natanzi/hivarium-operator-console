@@ -26,6 +26,8 @@ import type {
   LedgerTransactionKind,
   PrepaidCommercialArrangement,
   UsageRecord,
+  CustomerRequest,
+  LicenseDocument
 } from "@/domain/types";
 import type {
   AgentAccessGrantInput,
@@ -574,6 +576,76 @@ export class ApiRepository implements HiveRepository {
       `/api/customers/${encodeURIComponent(customerId)}/usage-summary${query ? `?${query}` : ""}`
     );
     return summary;
+  }
+
+
+
+  async listRequests(customerId: string): Promise<CustomerRequest[]> {
+    const { requests } = await this.request<{ requests: CustomerRequest[] }>(
+      `/api/customers/${encodeURIComponent(customerId)}/requests`
+    );
+    return requests;
+  }
+
+  async getRequest(customerId: string, requestId: string): Promise<CustomerRequest> {
+    const { request } = await this.request<{ request: CustomerRequest }>(
+      `/api/customers/${encodeURIComponent(customerId)}/requests/${encodeURIComponent(requestId)}`
+    );
+    return request;
+  }
+
+  async recordDecision(customerId: string, requestId: string, decision: { status: string; note: string }): Promise<CustomerRequest> {
+    const { request } = await this.request<{ request: CustomerRequest }>(
+      `/api/customers/${encodeURIComponent(customerId)}/requests/${encodeURIComponent(requestId)}/decision`,
+      { method: "POST", body: JSON.stringify(decision) }
+    );
+    return request;
+  }
+
+  async listLicenses(customerId: string): Promise<LicenseDocument[]> {
+    const { licenses } = await this.request<{ licenses: LicenseDocument[] }>(
+      `/api/customers/${encodeURIComponent(customerId)}/licenses`
+    );
+    return licenses;
+  }
+
+  async issueLicense(customerId: string, req: any): Promise<LicenseDocument> {
+    const { license } = await this.request<{ license: LicenseDocument }>(
+      `/api/customers/${encodeURIComponent(customerId)}/licenses`,
+      { method: "POST", body: JSON.stringify(req) }
+    );
+    return license;
+  }
+
+  async renewLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument> {
+    const { license } = await this.request<{ license: LicenseDocument }>(
+      `/api/customers/${encodeURIComponent(customerId)}/licenses/${encodeURIComponent(licenseId)}/renew`,
+      { method: "POST", body: JSON.stringify(req) }
+    );
+    return license;
+  }
+
+  async suspendLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument> {
+    const { license } = await this.request<{ license: LicenseDocument }>(
+      `/api/customers/${encodeURIComponent(customerId)}/licenses/${encodeURIComponent(licenseId)}/suspend`,
+      { method: "POST", body: JSON.stringify(req) }
+    );
+    return license;
+  }
+
+  async revokeLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument> {
+    const { license } = await this.request<{ license: LicenseDocument }>(
+      `/api/customers/${encodeURIComponent(customerId)}/licenses/${encodeURIComponent(licenseId)}/revoke`,
+      { method: "POST", body: JSON.stringify(req) }
+    );
+    return license;
+  }
+
+  async downloadLicense(customerId: string, licenseId: string): Promise<string> {
+    const { document } = await this.request<{ document: string }>(
+      `/api/customers/${encodeURIComponent(customerId)}/licenses/${encodeURIComponent(licenseId)}/document`
+    );
+    return document;
   }
 }
 

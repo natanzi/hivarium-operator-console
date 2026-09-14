@@ -6,16 +6,26 @@
     "directory": "./dist",
     "not_found_handling": "single-page-application",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": [
+      "/api/*"
+    ]
   },
   // D1 durable store owned by the Worker API (D-01). The database_id below is
-  // a local placeholder; replace it with the real D1 database id
-  // (`wrangler d1 create hivarium-operator-console`) before deploying.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "hivarium-operator-console",
       "database_id": "7bda4b7e-da65-43b8-bae9-1cc965b63c22"
+    }
+  ],
+  "services": [
+    {
+      "binding": "LICENSE_SERVICE",
+      "service": "hivarium-license-service"
+    },
+    {
+      "binding": "CUSTOMER_PORTAL_SERVICE",
+      "service": "hivarium-customer-portal"
     }
   ],
   // Cloudflare Access JWT verification configuration (D-03). These are

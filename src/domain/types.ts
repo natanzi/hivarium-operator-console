@@ -219,9 +219,31 @@ export interface AgentAccessGrant {
   createdAt: string;
   revokedAt: string | null;
   scheduledRevokeAt: string | null;
-  /** Linked activity event id that recorded the creation of this grant. */
   activityEventId: string;
   reasonForChange: string;
+}
+
+export interface CustomerRequest {
+  id: string;
+  customerId: string;
+  type: "license_renewal" | "plan_change" | "additional_agent_access" | "token_credit_request" | "support_request";
+  status: "pending" | "approved" | "rejected" | "needs_information" | "completed";
+  submittedAt: string;
+  summary: string;
+  history: Array<{ timestamp: string; status: string; actor: string; note?: string }>;
+  externalReference?: string;
+}
+
+export interface LicenseDocument {
+  id: string;
+  customerId: string;
+  productId: string;
+  revision: number;
+  status: "active" | "suspended" | "revoked" | "expired";
+  deploymentType: string;
+  validFrom: string;
+  validUntil: string | null;
+  entitlementLimits: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
