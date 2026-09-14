@@ -6,10 +6,7 @@
     "directory": "./dist",
     "not_found_handling": "single-page-application",
     "binding": "ASSETS",
-    "run_worker_first": [
-      "/api/*",
-      "/service/*"
-    ]
+    "run_worker_first": true
   },
   // D1 durable store owned by the Worker API (D-01). The database_id below is
   "d1_databases": [
