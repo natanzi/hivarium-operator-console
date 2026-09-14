@@ -34,3 +34,4 @@ _.sln
 playwright-report/
 test-results/
 .artifacts/
+.wrangler/
