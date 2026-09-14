@@ -1,5 +1,6 @@
 import type {
   CommercialArrangement,
+  CustomerRequest,
   LedgerTransactionKind,
 } from "@/domain/types";
 import { formatDate } from "@/lib/format";
@@ -43,6 +44,83 @@ export const TRANSACTION_KIND_LABELS: Record<LedgerTransactionKind, string> = {
   manual_adjustment: "Manual adjustment",
   reversal: "Reversal",
 };
+
+/**
+ * Presentation labels for portal request types. Canonical API/D1 values stay
+ * unchanged; this formatter is UI-only.
+ */
+export function formatRequestType(type: CustomerRequest["type"]): string {
+  switch (type) {
+    case "license_renewal":
+      return "License renewal";
+    case "additional_agent_access":
+      return "Additional agent access";
+    case "token_credit":
+      return "Token credit";
+    case "plan_change":
+      return "Plan change";
+    case "support":
+      return "Support";
+  }
+}
+
+/**
+ * Safe label for a request type that may be unknown at runtime. Known union
+ * values use the exhaustive formatter; anything else is readable, not raw.
+ */
+export function formatRequestTypeLabel(type: string): string {
+  switch (type) {
+    case "license_renewal":
+    case "additional_agent_access":
+    case "token_credit":
+    case "plan_change":
+    case "support":
+      return formatRequestType(type);
+    default: {
+      const cleaned = type.replace(/[_-]+/g, " ").trim();
+      if (!cleaned) return "Unknown request";
+      return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
+  }
+}
+
+/** Presentation labels for portal request statuses. Canonical values unchanged. */
+export function formatRequestStatus(status: CustomerRequest["status"]): string {
+  switch (status) {
+    case "submitted":
+      return "Submitted";
+    case "under_review":
+      return "Under review";
+    case "needs_information":
+      return "Needs information";
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    case "completed":
+      return "Completed";
+    case "cancelled":
+      return "Cancelled";
+  }
+}
+
+export function formatRequestStatusLabel(status: string): string {
+  switch (status) {
+    case "submitted":
+    case "under_review":
+    case "needs_information":
+    case "approved":
+    case "rejected":
+    case "completed":
+    case "cancelled":
+      return formatRequestStatus(status);
+    default: {
+      const cleaned = status.replace(/[_-]+/g, " ").trim();
+      if (!cleaned) return "Unknown status";
+      return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
+  }
+}
 
 /** Human label for a commercial model. */
 export function modelLabel(model: CommercialArrangement["model"]): string {

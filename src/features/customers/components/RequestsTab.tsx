@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/format";
+import { formatRequestStatusLabel, formatRequestTypeLabel } from "./format";
 import {
     AlertDialog,
     AlertDialogContent,
@@ -116,8 +117,8 @@ export function RequestsTab({ customerId }: { customerId: string }) {
             ) : requests.map(req => (
                 <div key={req.id} className="border p-4 rounded bg-card flex flex-col gap-2">
                     <div className="flex justify-between items-center">
-                        <div className="font-semibold text-lg">{req.type}</div>
-                        <Badge>{req.status}</Badge>
+                        <div className="font-semibold text-lg">{formatRequestTypeLabel(req.type)}</div>
+                        <Badge>{formatRequestStatusLabel(req.status)}</Badge>
                     </div>
                     <div className="text-sm">{req.summary}</div>
                     <div className="text-xs text-slate-500">Submitted: {formatDate(req.submittedAt)}</div>
@@ -142,7 +143,7 @@ export function RequestsTab({ customerId }: { customerId: string }) {
                     <AlertDialogHeader>
                         <AlertDialogTitle>Confirm Decision</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Are you sure you want to mark this {actionReq?.type} request as <strong>{actionReq?.status}</strong>?
+                            Are you sure you want to mark this {actionReq ? formatRequestTypeLabel(actionReq.type) : "request"} request as <strong>{actionReq ? formatRequestStatusLabel(actionReq.status) : ""}</strong>?
                             {actionReq?.type === "license_renewal" && actionReq?.status === "completed" && (
                                 <span className="block mt-2">This will issue a license renewal mutation to the License Service, then complete the portal request with the successor reference.</span>
                             )}
@@ -166,7 +167,7 @@ export function RequestsTab({ customerId }: { customerId: string }) {
                             onClick={confirmAction}
                             disabled={isSubmitting}
                         >
-                            {isSubmitting ? "Processing..." : `Confirm ${actionReq?.status}`}
+                            {isSubmitting ? "Processing..." : `Confirm ${actionReq ? formatRequestStatusLabel(actionReq.status) : ""}`}
                         </Button>
                     </AlertDialogFooter>
                 </AlertDialogContent>

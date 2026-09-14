@@ -26,6 +26,28 @@ describe("RequestsTab", () => {
         );
     };
 
+    it("renders a human-readable label for every request type and under_review", async () => {
+        repo.listRequests = vi.fn().mockResolvedValue([
+            { id: "req-a", type: "license_renewal", status: "under_review", summary: "A", submittedAt: MOCK_DATE },
+            { id: "req-b", type: "additional_agent_access", status: "submitted", summary: "B", submittedAt: MOCK_DATE },
+            { id: "req-c", type: "token_credit", status: "submitted", summary: "C", submittedAt: MOCK_DATE },
+            { id: "req-d", type: "plan_change", status: "submitted", summary: "D", submittedAt: MOCK_DATE },
+            { id: "req-e", type: "support", status: "submitted", summary: "E", submittedAt: MOCK_DATE },
+        ]);
+
+        renderTab();
+
+        expect(await screen.findByText("License renewal")).toBeInTheDocument();
+        expect(screen.getByText("Additional agent access")).toBeInTheDocument();
+        expect(screen.getByText("Token credit")).toBeInTheDocument();
+        expect(screen.getByText("Plan change")).toBeInTheDocument();
+        expect(screen.getByText("Support")).toBeInTheDocument();
+        expect(screen.getByText("Under review")).toBeInTheDocument();
+        expect(screen.queryByText("license_renewal")).not.toBeInTheDocument();
+        expect(screen.queryByText("under_review")).not.toBeInTheDocument();
+        expect(repo.listRequests).toHaveBeenCalledWith("cust-1");
+    });
+
     it("opens approval dialog and confirms", async () => {
         repo.listRequests = vi.fn().mockResolvedValue([{ id: "req-1", type: "plan_change", status: "submitted", summary: "Requesting plan change", submittedAt: MOCK_DATE }]);
         repo.recordDecision = vi.fn().mockResolvedValue({});
@@ -38,7 +60,7 @@ describe("RequestsTab", () => {
         const dialogTitle = await screen.findByText("Confirm Decision");
         expect(dialogTitle).toBeInTheDocument();
 
-        const confirmBtn = screen.getByRole("button", { name: "Confirm approved" });
+        const confirmBtn = screen.getByRole("button", { name: "Confirm Approved" });
         await user.click(confirmBtn);
 
         expect(repo.recordDecision).toHaveBeenCalledWith("cust-1", "req-1", { status: "approved", note: "Updated", idempotencyKey: "decision-req-1-approved", externalReference: undefined });
@@ -77,7 +99,7 @@ describe("RequestsTab", () => {
         const completeBtn = await screen.findByRole("button", { name: "Complete renewal" });
         await user.click(completeBtn);
 
-        const confirmBtn = screen.getByRole("button", { name: "Confirm completed" });
+        const confirmBtn = screen.getByRole("button", { name: "Confirm Completed" });
         await user.click(confirmBtn);
 
         // License Service succeeds (repo.renewLicense called) but portal request fails
