@@ -4,7 +4,7 @@ import { Navigate, createBrowserRouter } from "react-router";
 import { Layout } from "@/components/layout/Layout";
 import { Toaster } from "@/components/ui/sonner";
 import { RepositoryProvider } from "@/data/repository-context";
-import { repository } from "@/data/local-storage-repository";
+import { apiRepository } from "@/data/api-repository";
 import { AboutPage } from "@/features/about/pages/AboutPage";
 import { AgentCatalogPage } from "@/features/agents/pages/AgentCatalogPage";
 import { AgentDetailPage } from "@/features/agents/pages/AgentDetailPage";
@@ -41,7 +41,7 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         <RootRedirect />
       </RepositoryProvider>
     ),
@@ -49,7 +49,7 @@ export const router = createBrowserRouter([
   {
     path: "/customers",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<CustomersPage />)}
       </RepositoryProvider>
     ),
@@ -57,7 +57,7 @@ export const router = createBrowserRouter([
   {
     path: "/customers/new",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<CreateCustomerPage />)}
       </RepositoryProvider>
     ),
@@ -65,7 +65,7 @@ export const router = createBrowserRouter([
   {
     path: "/customers/:customerId/edit",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<EditCustomerPage />)}
       </RepositoryProvider>
     ),
@@ -73,7 +73,7 @@ export const router = createBrowserRouter([
   {
     path: "/customers/:customerId",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<CustomerProfilePage />)}
       </RepositoryProvider>
     ),
@@ -81,7 +81,7 @@ export const router = createBrowserRouter([
   {
     path: "/agents",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<AgentCatalogPage />)}
       </RepositoryProvider>
     ),
@@ -89,7 +89,7 @@ export const router = createBrowserRouter([
   {
     path: "/agents/:agentProductId",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<AgentDetailPage />)}
       </RepositoryProvider>
     ),
@@ -97,7 +97,7 @@ export const router = createBrowserRouter([
   {
     path: "/settings/about",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<AboutPage />)}
       </RepositoryProvider>
     ),
@@ -105,7 +105,7 @@ export const router = createBrowserRouter([
   {
     path: "*",
     element: (
-      <RepositoryProvider repository={repository}>
+      <RepositoryProvider repository={apiRepository}>
         {withLayout(<NotFound />)}
       </RepositoryProvider>
     ),

@@ -20,6 +20,7 @@ import {
   authenticateRequest,
   type OperatorIdentity,
 } from "./auth";
+import { buildSeedStore } from "../../src/data/seed-data";
 import {
   buildAuditEntry,
   commitStoreDiff,
@@ -81,6 +82,8 @@ export interface Env {
   ACCESS_AUD: string;
   /** Restricts access to exactly this email (Plan 03-01 authorization requirement). */
   AUTHORIZED_OPERATOR_EMAIL: string;
+  /** Bypass auth for E2E tests. */
+  E2E_TEST_AUTH?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +103,11 @@ class ApiError extends Error {
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      // Operator data must never be cached by the browser, a CDN, or a proxy.
+      "cache-control": "no-store",
+    },
   });
 }
 
@@ -279,6 +286,51 @@ async function handleCreateCustomer(
   });
   await commitStoreDiff(env.DB, diff, audit);
   return json({ customer }, 201);
+}
+
+async function handleUpdateCustomer(
+  request: Request,
+  env: Env,
+  customerId: string,
+  identity: OperatorIdentity
+): Promise<Response> {
+  const input = await request.json<{
+    name: string;
+    domain: string;
+    contact: string;
+    email?: string;
+  }>();
+  const before = await loadCustomerStore(env.DB, customerId);
+  const existing = requireNotArchived(requireCustomer(before, customerId));
+
+  const updated: Customer = {
+    ...existing,
+    name: input.name,
+    domain: input.domain,
+    contact: input.contact,
+  };
+
+  const after: DataStore = {
+    ...before,
+    customers: before.customers.map((c) => (c.id === customerId ? updated : c)),
+  };
+
+  const diff = diffStores(before, after);
+  const occurredAt = new Date().toISOString();
+  const audit = buildAuditEntry({
+    identity,
+    action: "customer.updated",
+    customerId,
+    subjectType: "customer",
+    subjectId: customerId,
+    summary: `Updated customer details for "${input.name}".`,
+    before: { name: existing.name, domain: existing.domain, contact: existing.contact },
+    after: { name: updated.name, domain: updated.domain, contact: updated.contact },
+    occurredAt,
+  });
+
+  await commitStoreDiff(env.DB, diff, audit);
+  return json({ customer: updated });
 }
 
 async function handleArchiveCustomer(
@@ -1048,6 +1100,9 @@ async function handleCustomers(
       }
       return json({ customer });
     }
+    if (method === "PUT") {
+      return handleUpdateCustomer(request, env, customerId, identity);
+    }
     throw new ApiError(405, "method-not-allowed", "Method not allowed.");
   }
 
@@ -1122,6 +1177,18 @@ async function handleCustomers(
     return json({ entries });
   }
 
+  if (rest[1] === "activity" && rest.length === 2 && method === "GET") {
+    const store = await loadCustomerStore(env.DB, customerId);
+    requireCustomer(store, customerId);
+    return json({ events: store.activityEvents });
+  }
+
+  if (rest[1] === "features" && rest.length === 2 && method === "GET") {
+    const store = await loadCustomerStore(env.DB, customerId);
+    requireCustomer(store, customerId);
+    return json({ entitlements: store.featureEntitlements });
+  }
+
   throw new ApiError(404, "not-found", "Unknown API route.");
 }
 
@@ -1171,6 +1238,44 @@ async function route(
       }
       return json({ product });
     }
+    if (segments.length === 4 && segments[3] === "customers") {
+      const agentId = segments[2];
+      const asOf = url.searchParams.get("asOf") || new Date().toISOString();
+      // D-08: Authorized customers query
+      const { results } = await env.DB.prepare(`
+        SELECT
+          c.id as customerId,
+          c.name as customerName,
+          g.agent_product_id as agentProductId,
+          g.id as grantId,
+          g.starts_at as startsAt,
+          g.ends_at as endsAt,
+          g.scheduled_revoke_at as scheduledRevokeAt
+        FROM agent_access_grants g
+        JOIN customers c ON c.id = g.customer_id
+        WHERE g.agent_product_id = ?
+          AND c.status NOT IN ('archived', 'churned')
+      `).bind(agentId).all<any>();
+      const rows = results.map(row => {
+        let status = "scheduled";
+        if (row.startsAt <= asOf && (!row.endsAt || row.endsAt > asOf)) {
+          status = "active";
+        }
+        return {
+          customerId: row.customerId,
+          customerName: row.customerName,
+          agentProductId: row.agentProductId,
+          grantId: row.grantId,
+          status,
+          startsAt: row.startsAt,
+          endsAt: row.endsAt || undefined,
+          scheduledRevokeAt: row.scheduledRevokeAt || undefined,
+        };
+      });
+      // Sort logic
+      rows.sort((a, b) => a.customerName.localeCompare(b.customerName) || a.grantId.localeCompare(b.grantId));
+      return json({ rows });
+    }
     throw new ApiError(404, "not-found", "Unknown API route.");
   }
 
@@ -1191,13 +1296,77 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     return json({ ok: true, service: "hivarium-operator-console" });
   }
 
+  if (request.method === "POST" && url.pathname === "/api/e2e/reset") {
+    if (env.E2E_TEST_AUTH === "true") {
+      await ensureCatalogSeeded(env);
+      const statements = [
+        "DROP TRIGGER IF EXISTS ledger_transactions_no_delete;",
+        "DROP TRIGGER IF EXISTS usage_records_no_delete;",
+        "DROP TRIGGER IF EXISTS audit_entries_no_delete;",
+        "DROP TRIGGER IF EXISTS customers_no_delete_with_dependents;",
+        "DELETE FROM usage_records;",
+        "DELETE FROM ledger_transactions;",
+        "DELETE FROM commercial_arrangements;",
+        "DELETE FROM agent_access_grants;",
+        "DELETE FROM activity_events;",
+        "DELETE FROM audit_entries;",
+        "DELETE FROM feature_entitlements;",
+        "DELETE FROM customers;",
+        "CREATE TRIGGER ledger_transactions_no_delete BEFORE DELETE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'ledger_transactions is append-only, deletes are forbidden.'); END;",
+        "CREATE TRIGGER usage_records_no_delete BEFORE DELETE ON usage_records BEGIN SELECT RAISE(ABORT, 'usage_records is append-only, deletes are forbidden.'); END;",
+        "CREATE TRIGGER audit_entries_no_delete BEFORE DELETE ON audit_entries BEGIN SELECT RAISE(ABORT, 'audit_entries is immutable, deletes are forbidden.'); END;",
+        "CREATE TRIGGER customers_no_delete_with_dependents BEFORE DELETE ON customers BEGIN SELECT RAISE(ABORT, 'customers cannot be deleted, archive instead.') WHERE EXISTS (SELECT 1 FROM commercial_arrangements WHERE customer_id = OLD.id) OR EXISTS (SELECT 1 FROM agent_access_grants WHERE customer_id = OLD.id) OR EXISTS (SELECT 1 FROM activity_events WHERE customer_id = OLD.id) OR EXISTS (SELECT 1 FROM ledger_transactions WHERE customer_id = OLD.id) OR EXISTS (SELECT 1 FROM usage_records WHERE customer_id = OLD.id) OR EXISTS (SELECT 1 FROM feature_entitlements WHERE customer_id = OLD.id); END;"
+      ];
+      for (const stmt of statements) {
+        await env.DB.prepare(stmt).run();
+      }
+      // Re-seed using the canonical utility.
+      const diff = diffStores(
+        {
+          schemaVersion: 4,
+          customers: [],
+          commercialArrangements: [],
+          agentAccessGrants: [],
+          activityEvents: [],
+          ledgerTransactions: [],
+          usageRecords: [],
+          featureEntitlements: [],
+          agentProducts: [],
+        },
+        buildSeedStore()
+      );
+      await commitStoreDiff(env.DB, diff, buildAuditEntry({
+        identity: { email: "e2e@hivarium.test", sub: "e2e", name: "E2E" },
+        action: "reseed_for_e2e",
+        customerId: "",
+        subjectType: "system",
+        subjectId: "e2e",
+        summary: "E2E seed reset",
+        occurredAt: new Date().toISOString(),
+      }));
+      return json({ ok: true });
+    }
+  }
+
   // Auth middleware (D-03): every other /api/* request must carry a valid
   // Cf-Access-Jwt-Assertion header; rejection happens before any route logic.
-  const auth = await authenticateRequest(request, {
-    teamDomain: env.ACCESS_TEAM_DOMAIN,
-    audience: env.ACCESS_AUD,
-    authorizedEmails: [env.AUTHORIZED_OPERATOR_EMAIL],
-  });
+  let auth: { ok: true; identity: OperatorIdentity } | { ok: false; reason: string } = { ok: false, reason: "init" };
+  if (env.E2E_TEST_AUTH === "true") {
+    auth = {
+      ok: true,
+      identity: {
+        email: env.AUTHORIZED_OPERATOR_EMAIL,
+        sub: "e2e-sub",
+        name: "E2E Operator",
+      },
+    };
+  } else {
+    auth = await authenticateRequest(request, {
+      teamDomain: env.ACCESS_TEAM_DOMAIN,
+      audience: env.ACCESS_AUD,
+      authorizedEmails: [env.AUTHORIZED_OPERATOR_EMAIL],
+    });
+  }
   if (!auth.ok) {
     return errorResponse(401, "unauthorized", auth.reason);
   }
@@ -1221,7 +1390,8 @@ export default {
     if (url.pathname.startsWith("/api/")) {
       return handleApi(request, env, url);
     }
-    return env.ASSETS.fetch(request);
+    // For non-API routes on a SPA, ask the asset router for index.html.
+    return env.ASSETS ? env.ASSETS.fetch(request) : fetch(new URL("/", request.url), request);
   },
 } satisfies ExportedHandler<Env>;
 

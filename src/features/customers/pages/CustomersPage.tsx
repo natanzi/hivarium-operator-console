@@ -12,11 +12,8 @@ import { createInMemoryRepository } from "@/data/local-storage-repository";
 import { useRepository } from "@/data/repository-context";
 import { formatDate } from "@/lib/format";
 import type {
-  AgentLicense,
   Customer,
   CustomerStatus,
-  FeatureEntitlement,
-  Subscription,
 } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { DataTable, type DataTableColumn } from "@/data/data-table";
@@ -25,17 +22,20 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layout/Layout";
-import { formatTokens } from "@/features/customers/components/format";
+import { formatTokens, formatUsd } from "@/features/customers/components/format";
 import { ArchiveCustomerDialog } from "@/features/customers/components/ArchiveCustomerDialog";
-import type { PrepaidSnapshot } from "@/data/local-storage-repository";
+import type {
+  AgentAccessSnapshot,
+  CommercialSnapshot,
+  PrepaidSnapshot,
+} from "@/data/local-storage-repository";
 
 type StatusFilter = CustomerStatus | "all";
 
 /** Per-customer related records resolved once per load for the table columns. */
 interface RelatedData {
-  subscriptions: Map<string, Subscription[]>;
-  entitlements: Map<string, FeatureEntitlement[]>;
-  licenses: Map<string, AgentLicense[]>;
+  commercial: Map<string, CommercialSnapshot>;
+  access: Map<string, AgentAccessSnapshot>;
   prepaid: Map<string, PrepaidSnapshot>;
   productNames: Map<string, string>;
 }
@@ -68,29 +68,26 @@ export function CustomersPage() {
       const productNames = new Map(
         (await repo.listAgentProducts()).map((p) => [p.id, p.name] as const)
       );
-      const subscriptions = new Map<string, Subscription[]>();
-      const entitlements = new Map<string, FeatureEntitlement[]>();
-      const licenses = new Map<string, AgentLicense[]>();
+      const commercial = new Map<string, CommercialSnapshot>();
+      const access = new Map<string, AgentAccessSnapshot>();
       const prepaid = new Map<string, PrepaidSnapshot>();
       const entries = await Promise.all(
         list.map(async (c) => {
-          const [subs, ents, lic, prep] = await Promise.all([
-            repo.getSubscriptions(c.id),
-            repo.getFeatureEntitlements(c.id),
-            repo.getAgentLicenses(c.id),
+          const [com, acc, prep] = await Promise.all([
+            repo.getCommercialSnapshot(c.id, SEED_NOW),
+            repo.getAgentAccessSnapshot(c.id, SEED_NOW),
             repo.getPrepaidSnapshot(c.id, SEED_NOW),
           ]);
-          return [c.id, subs, ents, lic, prep] as const;
+          return [c.id, com, acc, prep] as const;
         })
       );
-      for (const [id, subs, ents, lic, prep] of entries) {
-        subscriptions.set(id, subs);
-        entitlements.set(id, ents);
-        licenses.set(id, lic);
+      for (const [id, com, acc, prep] of entries) {
+        commercial.set(id, com);
+        access.set(id, acc);
         prepaid.set(id, prep);
       }
       setCustomers(list);
-      setRelated({ subscriptions, entitlements, licenses, prepaid, productNames });
+      setRelated({ commercial, access, prepaid, productNames });
     } catch (error) {
       setLoadError(
         error instanceof Error ? error.message : "Could not load customers."
@@ -135,10 +132,6 @@ export function CustomersPage() {
 
   const columns: DataTableColumn<Customer>[] = useMemo(() => {
     if (!related) return [];
-    const activeSubs = (c: Customer) =>
-      (related.subscriptions.get(c.id) ?? []).filter(
-        (s) => s.status === "active" || s.status === "trialing"
-      );
 
     return [
       {
@@ -171,10 +164,11 @@ export function CustomersPage() {
         ),
       },
       {
-        id: "subscription",
-        header: "Subscription",
+        id: "commercial",
+        header: "Commercial terms",
         cell: (c) => {
           const prepaid = related.prepaid.get(c.id);
+          const com = related.commercial.get(c.id);
           if (prepaid?.arrangement) {
             return (
               <div className="leading-tight">
@@ -197,34 +191,32 @@ export function CustomersPage() {
               </div>
             );
           }
-          const subs = activeSubs(c);
-          if (subs.length === 0) {
+          if (!com?.active) {
             return <span className="text-muted-foreground text-sm">—</span>;
           }
-          const plans = [
-            ...new Set(subs.map((s) => PLAN_LABELS[s.plan])),
-          ].join(", ");
-          const seats = subs.reduce((n, s) => n + s.seats, 0);
-          return (
-            <div className="leading-tight">
-              <p className="text-sm">{plans}</p>
-              <p className="text-muted-foreground text-xs tabular-nums">
-                {seats} {seats === 1 ? "seat" : "seats"}
-              </p>
-            </div>
-          );
+          if (com.active.model === "monthly") {
+            return (
+              <div className="leading-tight">
+                <p className="text-sm">Monthly</p>
+                <p className="text-muted-foreground text-xs">{formatUsd(com.active.monthlyAmountCents)}</p>
+              </div>
+            );
+          }
+          return <span className="text-sm capitalize">{com.active.model}</span>;
         },
       },
       {
         id: "deployment",
         header: "Deployment",
         cell: (c) => {
+          const access = related.access.get(c.id);
+          const active = access?.current ?? [];
           const names = [
             ...new Set(
-              activeSubs(c).map(
-                (s) =>
-                  related.productNames.get(s.agentProductId) ??
-                  s.agentProductId
+              active.map(
+                (g) =>
+                  related.productNames.get(g.agentProductId) ??
+                  g.agentProductId
               )
             ),
           ];
@@ -235,56 +227,15 @@ export function CustomersPage() {
         },
       },
       {
-        id: "features",
-        header: "Features",
-        cell: (c) => {
-          const list = related.entitlements.get(c.id) ?? [];
-          if (list.length === 0) {
-            return <span className="text-muted-foreground text-sm">—</span>;
-          }
-          return (
-            <span
-              className="tabular-nums text-sm"
-              title={list.map((e) => e.feature).join(", ")}
-            >
-              {list.length}
-            </span>
-          );
-        },
-      },
-      {
-        id: "agents",
-        header: "Agents",
-        cell: (c) => {
-          const list = related.licenses.get(c.id) ?? [];
-          if (list.length === 0) {
-            return <span className="text-muted-foreground text-sm">—</span>;
-          }
-          return (
-            <span
-              className="tabular-nums text-sm"
-              title={list
-                .map(
-                  (l) =>
-                    related.productNames.get(l.agentProductId) ??
-                    l.agentProductId
-                )
-                .join(", ")}
-            >
-              {list.length}
-            </span>
-          );
-        },
-      },
-      {
         id: "updated",
         header: "Updated",
         cell: (c) => {
+          const com = related.commercial.get(c.id);
+          const active = related.access.get(c.id)?.current ?? [];
           const dates = [
-            ...(related.subscriptions.get(c.id) ?? []).map((s) => s.renewsAt),
-            ...(related.entitlements.get(c.id) ?? []).map((e) => e.grantedAt),
-            ...(related.licenses.get(c.id) ?? []).map((l) => l.issuedAt),
-          ];
+            com?.active?.createdAt,
+            ...active.map((g) => g.startsAt),
+          ].filter((d): d is string => d !== undefined);
           const latest =
             dates.length > 0 ? dates.sort()[dates.length - 1] : c.createdAt;
           return <span className="text-sm">{formatDate(latest)}</span>;

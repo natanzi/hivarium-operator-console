@@ -11,6 +11,21 @@
  * records are migration inputs only (see {@link DataStoreV1}).
  */
 
+/** An entry from the operator audit trail. */
+export interface AuditEntry {
+  id: string;
+  customerId: string | null;
+  operatorSub: string;
+  operatorEmail: string;
+  action: string;
+  subjectType: string;
+  subjectId: string;
+  summary: string;
+  beforeJson: string | null;
+  afterJson: string | null;
+  occurredAt: string;
+}
+
 export type CustomerStatus =
   | "evaluation"
   | "active"

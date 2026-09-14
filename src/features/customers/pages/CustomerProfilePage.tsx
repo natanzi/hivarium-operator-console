@@ -31,6 +31,7 @@ import type {
   Customer,
   FeatureEntitlement,
   LedgerTransaction,
+  AuditEntry,
 } from "@/domain/types";
 import type { AccountStatementRow } from "@/domain/ledger-rules";
 import type {
@@ -46,6 +47,7 @@ import {
 } from "@/features/customers/components/CommercialArrangementSheet";
 import { AgentAccessSheet, RevokeAccessDialog } from "@/features/customers/components/AgentAccessSheet";
 import { ActivityTimeline } from "@/features/customers/components/ActivityTimeline";
+import { OperatorAuditTrail } from "@/features/customers/components/OperatorAuditTrail";
 import { TokenStatement } from "@/features/customers/components/TokenStatement";
 import { AddCreditSheet } from "@/features/customers/components/AddCreditSheet";
 import { AdjustmentSheet } from "@/features/customers/components/AdjustmentSheet";
@@ -71,6 +73,7 @@ interface ProfileData {
   statementRows: AccountStatementRow[];
   entitlements: FeatureEntitlement[];
   products: Map<string, AgentProduct>;
+  auditEntries: AuditEntry[];
 }
 
 /**
@@ -136,6 +139,7 @@ export function CustomerProfilePage() {
           statementRows: [],
           entitlements: [],
           products: new Map(),
+          auditEntries: [],
         });
         return;
       }
@@ -147,6 +151,7 @@ export function CustomerProfilePage() {
         statementRows,
         entitlements,
         products,
+        auditEntries,
       ] = await Promise.all([
         repo.getCommercialSnapshot(customerId, SEED_NOW),
         repo.getAgentAccessSnapshot(customerId, SEED_NOW),
@@ -155,6 +160,7 @@ export function CustomerProfilePage() {
         repo.getAccountStatement(customerId),
         repo.getFeatureEntitlements(customerId),
         repo.listAgentProducts(),
+        repo.listAuditEntries(customerId),
       ]);
       setData({
         customer,
@@ -165,6 +171,7 @@ export function CustomerProfilePage() {
         statementRows,
         entitlements,
         products: new Map(products.map((p) => [p.id, p])),
+        auditEntries,
       });
     } catch (error) {
       setLoadError(
@@ -380,6 +387,10 @@ export function CustomerProfilePage() {
             />
           ) : null}
           <ActivityTimeline events={data.activityEvents} products={data.products} />
+          <OperatorAuditTrail
+            entries={data.auditEntries}
+            customerName={data.customer?.name ?? ""}
+          />
         </TabsContent>
       </Tabs>
 

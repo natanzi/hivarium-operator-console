@@ -33,9 +33,11 @@ import type {
   AgentAccessGrantInput,
   CommercialArrangementInput,
 } from "@/domain/commercial-rules";
-import type {
-  AccountStatementRow,
-  UsagePeriod,
+import {
+  deriveTokenBalance,
+  isLowBalance,
+  type AccountStatementRow,
+  type UsagePeriod,
 } from "@/domain/ledger-rules";
 import type {
   AgentAccessSnapshot,
@@ -48,6 +50,7 @@ import type {
   PrepaidSnapshot,
   UsageSummary,
 } from "@/data/local-storage-repository";
+import type { AuditEntry } from "@/domain/types";
 
 /** Backend error envelope: `{ error: { code, message } }`. */
 interface ApiErrorEnvelope {
@@ -139,6 +142,7 @@ export class ApiRepository implements HiveRepository {
     init?: RequestInit
   ): Promise<T> {
     const response = await fetch(this.url(path), {
+      cache: "no-store",
       ...init,
       headers: {
         "content-type": "application/json",
@@ -150,6 +154,7 @@ export class ApiRepository implements HiveRepository {
 
   private async requestVoid(path: string, init?: RequestInit): Promise<void> {
     const response = await fetch(this.url(path), {
+      cache: "no-store",
       ...init,
       headers: {
         "content-type": "application/json",
@@ -210,9 +215,12 @@ export class ApiRepository implements HiveRepository {
     return customer;
   }
 
-  async updateCustomer(_id: string, _input: CustomerInput): Promise<Customer> {
-    // The Worker API has no PUT /api/customers/:id endpoint yet.
-    throw new UnsupportedOperationError("updateCustomer");
+  async updateCustomer(id: string, input: CustomerInput): Promise<Customer> {
+    const { customer } = await this.request<{ customer: Customer }>(
+      `/api/customers/${encodeURIComponent(id)}`,
+      { method: "PUT", body: JSON.stringify(input) }
+    );
+    return customer;
   }
 
   async archiveCustomer(id: string): Promise<void> {
@@ -229,9 +237,12 @@ export class ApiRepository implements HiveRepository {
   }
 
   async getFeatureEntitlements(
-    _customerId: string
+    customerId: string
   ): Promise<FeatureEntitlement[]> {
-    throw new UnsupportedOperationError("getFeatureEntitlements");
+    const { entitlements } = await this.request<{ entitlements: FeatureEntitlement[] }>(
+      `/api/customers/${encodeURIComponent(customerId)}/features`
+    );
+    return entitlements;
   }
 
   async getAgentLicenses(_customerId: string): Promise<AgentLicense[]> {
@@ -260,10 +271,13 @@ export class ApiRepository implements HiveRepository {
   }
 
   async listCustomersWithAgentAccess(
-    _agentProductId: string,
-    _asOf: string | number
+    agentProductId: string,
+    asOf: string | number
   ): Promise<AgentCustomerAccessRow[]> {
-    throw new UnsupportedOperationError("listCustomersWithAgentAccess");
+    const { rows } = await this.request<{ rows: AgentCustomerAccessRow[] }>(
+      `/api/agents/${encodeURIComponent(agentProductId)}/customers?asOf=${encodeURIComponent(asOf)}`
+    );
+    return rows;
   }
 
   // --- Commercial arrangements --------------------------------------------
@@ -379,29 +393,52 @@ export class ApiRepository implements HiveRepository {
 
   // --- Activity ------------------------------------------------------------
 
-  async listActivityEvents(_customerId: string): Promise<ActivityEvent[]> {
-    // The Worker exposes audit entries (a different shape) under /audit; the
-    // canonical ActivityEvent timeline is not yet served by the API.
-    throw new UnsupportedOperationError("listActivityEvents");
+  async listActivityEvents(customerId: string): Promise<ActivityEvent[]> {
+    const { events } = await this.request<{ events: ActivityEvent[] }>(
+      `/api/customers/${encodeURIComponent(customerId)}/activity`
+    );
+    return events;
+  }
+
+  async listAuditEntries(customerId: string): Promise<AuditEntry[]> {
+    const { entries } = await this.request<{ entries: AuditEntry[] }>(
+      `/api/customers/${encodeURIComponent(customerId)}/audit`
+    );
+    return entries;
   }
 
   // --- Prepaid token ledger ------------------------------------------------
 
   async listLedgerTransactions(
-    _customerId: string
+    customerId: string
   ): Promise<LedgerTransaction[]> {
-    throw new UnsupportedOperationError("listLedgerTransactions");
+    const data = await this.request<{ rows: { transaction: LedgerTransaction }[] }>(
+      `/api/customers/${encodeURIComponent(customerId)}/ledger`
+    );
+    return data.rows.map((row) => row.transaction);
   }
 
-  async getTokenBalance(_customerId: string): Promise<number> {
-    throw new UnsupportedOperationError("getTokenBalance");
+  async getTokenBalance(customerId: string): Promise<number> {
+    const transactions = await this.listLedgerTransactions(customerId);
+    return deriveTokenBalance(transactions, customerId);
   }
 
   async getPrepaidSnapshot(
-    _customerId: string,
-    _asOf: string | number
+    customerId: string,
+    asOf: string | number
   ): Promise<PrepaidSnapshot> {
-    throw new UnsupportedOperationError("getPrepaidSnapshot");
+    const transactions = await this.listLedgerTransactions(customerId);
+    const balanceTokens = deriveTokenBalance(transactions, customerId);
+    const commercial = await this.getCommercialSnapshot(customerId, asOf);
+    const arrangement = commercial.active?.model === "prepaid" ? commercial.active : null;
+    return {
+      customerId,
+      asOf: typeof asOf === "number" ? new Date(asOf).toISOString() : asOf,
+      balanceTokens,
+      arrangement,
+      lowBalance: arrangement ? isLowBalance(balanceTokens, arrangement.warningThresholdTokens) : false,
+      transactionCount: transactions.length,
+    };
   }
 
   async addCreditGrant(

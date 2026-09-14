@@ -15,6 +15,7 @@ import type {
   PrepaidCommercialArrangement,
   Subscription,
   UsageRecord,
+  AuditEntry,
 } from "@/domain/types";
 import { normalizeCustomerStatus, STORE_SCHEMA_VERSION } from "@/domain/types";
 import {
@@ -276,6 +277,8 @@ export interface HiveRepository {
   // --- Activity ------------------------------------------------------------
   /** Chronological (newest first) activity events for a customer. */
   listActivityEvents(customerId: string): Promise<ActivityEvent[]>;
+  /** Real audit trail for a customer */
+  listAuditEntries(customerId: string): Promise<AuditEntry[]>;
 
   // --- Prepaid token ledger ------------------------------------------------
   /**
@@ -1196,6 +1199,10 @@ export class LocalStorageRepository implements HiveRepository {
     return this.read()
       .activityEvents.filter((event) => event.customerId === customerId)
       .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+  }
+
+  async listAuditEntries(_customerId: string): Promise<AuditEntry[]> {
+    return [];
   }
 
   // -- Prepaid token ledger ------------------------------------------------

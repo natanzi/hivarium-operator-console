@@ -14,13 +14,10 @@ import { test, expect } from "@playwright/test";
 const STORAGE_KEY = "hivarium.operator-console.store.v1";
 
 test.describe("Hivarium Operator Console E2E", () => {
-    test.beforeEach(async ({ page }) => {
-        await page.addInitScript((key) => {
-            if (!window.sessionStorage.getItem("__e2e_store_reset__")) {
-                window.localStorage.removeItem(key);
-                window.sessionStorage.setItem("__e2e_store_reset__", "1");
-            }
-        }, STORAGE_KEY);
+    test.beforeEach(async ({ request }) => {
+        const res = await request.post("/api/e2e/reset");
+        const body = await res.text();
+        expect(res.ok(), body).toBeTruthy();
     });
 
     // -------------------------------------------------------------------------
@@ -41,7 +38,8 @@ test.describe("Hivarium Operator Console E2E", () => {
     test("search filters the customer list and handles zero results", async ({ page }) => {
         await page.goto("/customers");
         const search = page.getByTestId("customer-search");
-
+        const bodyText = await page.locator("body").innerText();
+        console.error("BODY TEXT AT TEST 2:", bodyText);
         await search.fill("XYZ123NonExistent");
         await expect(page.getByText("No customers match the current filters.")).toBeVisible();
         await expect(page.locator("body")).toContainText(/Showing\s+0[–-]0\s+of\s+0/);

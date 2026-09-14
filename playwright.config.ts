@@ -2,16 +2,16 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
     testDir: './e2e',
-    fullyParallel: true,
+    fullyParallel: false,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
-    workers: process.env.CI ? 1 : undefined,
+    workers: 1,
     reporter: 'html',
     use: {
         baseURL: 'http://localhost:4173',
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
-        },
+    },
     projects: [
         {
             name: 'chromium',
@@ -19,7 +19,7 @@ export default defineConfig({
         },
     ],
     webServer: {
-        command: 'npm run build && npx vite preview --port 4173',
+        command: 'npm run build && CI=1 npx wrangler d1 migrations apply hivarium-operator-console --local && npx wrangler dev --port 4173 --var E2E_TEST_AUTH:true',
         url: 'http://localhost:4173',
         reuseExistingServer: !process.env.CI,
     },

@@ -5,7 +5,7 @@
 import { createContext, useContext } from "react";
 
 import type { HiveRepository } from "@/data/local-storage-repository";
-import { repository } from "@/data/local-storage-repository";
+import { apiRepository } from "@/data/api-repository";
 
 const RepositoryContext = createContext<HiveRepository | null>(null);
 
@@ -22,6 +22,6 @@ export function RepositoryProvider(ctx: {
 
 export function useRepository(): HiveRepository {
   const ctx = useContext(RepositoryContext);
-  if (!ctx) return repository;
+  if (!ctx) return apiRepository;
   return ctx;
 }

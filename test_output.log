@@ -1,0 +1,545 @@
+
+> hivarium-operator-console@0.1.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/home/tanglab/Desktop/hivarium-operator-console[39m
+
+ [32m✓[39m src/domain/ledger-rules.test.ts [2m([22m[2m111 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m src/domain/commercial-rules.test.ts [2m([22m[2m80 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [31m❯[39m src/data/api-repository.test.ts [2m([22m[2m44 tests[22m[2m | [22m[31m4 failed[39m[2m)[22m[32m 39[2mms[22m[39m
+     [32m✓[39m prepends a configured base URL and strips a trailing slash[32m 4[2mms[22m[39m
+     [32m✓[39m defaults to the same origin when no base URL is configured[32m 1[2mms[22m[39m
+     [32m✓[39m sends JSON content-type on every request[32m 0[2mms[22m[39m
+     [32m✓[39m getCurrentOperator reads identity from the /api/me envelope[32m 1[2mms[22m[39m
+     [32m✓[39m throws an ApiError with the envelope code when the operator is signed out (401)[32m 1[2mms[22m[39m
+     [32m✓[39m maps a non-2xx error envelope to a descriptive ApiError[32m 1[2mms[22m[39m
+     [32m✓[39m falls back to the HTTP status text when the error body is not the envelope[32m 1[2mms[22m[39m
+     [32m✓[39m uses a generic status message when the response has no status text[32m 1[2mms[22m[39m
+     [32m✓[39m listCustomers reads the customers array from GET /api/customers[32m 1[2mms[22m[39m
+     [32m✓[39m hasData is derived from the customer list length[32m 1[2mms[22m[39m
+     [32m✓[39m getCustomer decodes the id segment and returns the envelope customer[32m 1[2mms[22m[39m
+     [32m✓[39m getCustomer returns undefined for a 404 without throwing[32m 1[2mms[22m[39m
+     [32m✓[39m getCustomer rethrows non-404 ApiErrors[32m 1[2mms[22m[39m
+     [32m✓[39m createCustomer POSTs the input and returns the envelope customer[32m 1[2mms[22m[39m
+     [32m✓[39m archiveCustomer POSTs an empty body to the archive subpath[32m 0[2mms[22m[39m
+     [32m✓[39m archiveCustomer surfaces backend validation errors[32m 1[2mms[22m[39m
+     [32m✓[39m listAgentProducts reads the products array from GET /api/agents[32m 0[2mms[22m[39m
+     [32m✓[39m getAgentProduct returns undefined for a 404[32m 0[2mms[22m[39m
+     [32m✓[39m getCommercialSnapshot reads the snapshot from GET /api/customers/:id/commercial[32m 0[2mms[22m[39m
+     [32m✓[39m listCommercialArrangements derives history from the live snapshot[32m 0[2mms[22m[39m
+     [32m✓[39m saveCommercialArrangement POSTs the validated input plus occurredAt[32m 0[2mms[22m[39m
+     [32m✓[39m terminateCommercialArrangement POSTs reason plus occurredAt to the terminate subpath[32m 0[2mms[22m[39m
+     [32m✓[39m getAgentAccessSnapshot reads the snapshot from GET /api/customers/:id/access[32m 0[2mms[22m[39m
+     [32m✓[39m listAgentAccessGrants flattens current, scheduled, and history in order[32m 0[2mms[22m[39m
+     [32m✓[39m grantAgentAccess POSTs the validated input plus occurredAt[32m 0[2mms[22m[39m
+     [32m✓[39m revokeAgentAccess POSTs reason, effectiveAt, and occurredAt to the revoke subpath[32m 0[2mms[22m[39m
+     [32m✓[39m addCreditGrant POSTs the credit payload and returns the envelope transaction[32m 1[2mms[22m[39m
+     [32m✓[39m recordUsageDebit POSTs the usage payload and returns the usage/transaction pair[32m 0[2mms[22m[39m
+     [32m✓[39m addManualAdjustment POSTs the adjustment payload[32m 0[2mms[22m[39m
+     [32m✓[39m reverseTransaction POSTs the reversal payload[32m 0[2mms[22m[39m
+     [32m✓[39m updateWarningThreshold sends a PUT with the threshold value[32m 0[2mms[22m[39m
+     [32m✓[39m getAccountStatement reads the statement rows from GET /api/customers/:id/ledger[32m 0[2mms[22m[39m
+     [32m✓[39m getUsageSummary appends all four query parameters when supplied[32m 1[2mms[22m[39m
+     [32m✓[39m getUsageSummary sends a bare path when no filters are supplied[32m 0[2mms[22m[39m
+     [32m✓[39m reset throws UnsupportedOperationError without touching fetch[32m 0[2mms[22m[39m
+[31m     [31m×[31m updateCustomer throws UnsupportedOperationError without touching fetch[39m[32m 7[2mms[22m[39m
+     [32m✓[39m getSubscriptions throws UnsupportedOperationError without touching fetch[32m 0[2mms[22m[39m
+[31m     [31m×[31m getFeatureEntitlements throws UnsupportedOperationError without touching fetch[39m[32m 3[2mms[22m[39m
+     [32m✓[39m getAgentLicenses throws UnsupportedOperationError without touching fetch[32m 0[2mms[22m[39m
+     [32m✓[39m reconcileCommercialLifecycle throws UnsupportedOperationError without touching fetch[32m 0[2mms[22m[39m
+[31m     [31m×[31m listActivityEvents throws UnsupportedOperationError without touching fetch[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m getTokenBalance throws UnsupportedOperationError without touching fetch[39m[32m 1[2mms[22m[39m
+     [32m✓[39m every read method returns a Promise[32m 1[2mms[22m[39m
+     [32m✓[39m resolves reads that reject fetch with a network-like error as rejections, not undefined[32m 1[2mms[22m[39m
+ [32m✓[39m src/data/local-storage-repository.test.ts [2m([22m[2m56 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+[90mstderr[2m | src/features/agents/pages/AgentCatalogPage.test.tsx[2m > [22m[2mAgentCatalogPage[2m > [22m[2mrenders the page title
+[22m[39mAn update to AgentCatalogPage inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/features/about/pages/AboutPage.test.tsx[2m > [22m[2mAboutPage[2m > [22m[2mrenders the page title
+[22m[39mAn update to AboutPage inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/features/about/pages/AboutPage.test.tsx[2m > [22m[2mAboutPage[2m > [22m[2mdescribes the product and surfaces
+[22m[39mAn update to AboutPage inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/features/about/pages/AboutPage.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 58[2mms[22m[39m
+ [32m✓[39m src/features/agents/pages/AgentCatalogPage.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 166[2mms[22m[39m
+ [32m✓[39m src/features/agents/pages/AgentDetailPage.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 88[2mms[22m[39m
+ [32m✓[39m src/features/customers/pages/CreateCustomerPage.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 373[2mms[22m[39m
+ [32m✓[39m src/features/customers/pages/CustomersPage.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 440[2mms[22m[39m
+     [33m[2m✓[22m[39m requires confirmation and archives the customer while retaining related records [33m 347[2mms[22m[39m
+[90mstderr[2m | src/features/customers/pages/CustomerProfilePage.test.tsx[2m > [22m[2mCustomerProfilePage[2m > [22m[2msupports arrow-key navigation between tabs
+[22m[39mAn update to ForwardRef(RovingFocusGroupImpl) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/features/customers/pages/EditCustomerPage.test.tsx[2m > [22m[2mEditCustomerPage[2m > [22m[2mpersists edits through updateCustomer when the form is valid
+[22m[39mAn update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/features/customers/pages/CustomerProfilePage.test.tsx[2m > [22m[2mCustomerProfilePage[2m > [22m[2msupports Home and End keyboard navigation
+[22m[39mAn update to ForwardRef(Tabs) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(RovingFocusGroupImpl) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/features/customers/pages/EditCustomerPage.test.tsx[2m > [22m[2mEditCustomerPage[2m > [22m[2mhandles asynchronous status loading and preserves it during edits without clearing
+[22m[39mAn update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SelectProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItemText) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(SelectItem) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/features/customers/pages/EditCustomerPage.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 893[2mms[22m[39m
+     [33m[2m✓[22m[39m persists edits through updateCustomer when the form is valid [33m 468[2mms[22m[39m
+ [32m✓[39m src/features/customers/pages/CustomerProfilePage.test.tsx [2m([22m[2m76 tests[22m[2m)[22m[33m 11745[2mms[22m[39m
+     [33m[2m✓[22m[39m creates a monthly arrangement through the drawer [33m 404[2mms[22m[39m
+     [33m[2m✓[22m[39m creates an annual arrangement through the drawer [33m 554[2mms[22m[39m
+     [33m[2m✓[22m[39m schedules a commercial change and keeps the current arrangement active [33m 346[2mms[22m[39m
+     [33m[2m✓[22m[39m combines date, agent, and transaction-type filters [33m 337[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Review usage disabled until every required field is valid [33m 396[2mms[22m[39m
+     [33m[2m✓[22m[39m records usage through the named-customer confirmation with exact copy [33m 303[2mms[22m[39m
+     [33m[2m✓[22m[39m announces an exact replay with no additional deduction [33m 681[2mms[22m[39m
+     [33m[2m✓[22m[39m preserves the form and shows the conflict message on conflicting reuse [33m 606[2mms[22m[39m
+     [33m[2m✓[22m[39m asks to discard a dirty usage draft before closing [33m 313[2mms[22m[39m
+     [33m[2m✓[22m[39m applies a negative adjustment through the named-customer confirmation [33m 305[2mms[22m[39m
+     [33m[2m✓[22m[39m asks to discard a dirty adjustment draft before closing [33m 309[2mms[22m[39m
+     [33m[2m✓[22m[39m blocks a second reversal of the same target with the precise reason [33m 367[2mms[22m[39m
+     [33m[2m✓[22m[39m asks to discard a dirty reversal draft before closing [33m 457[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 4 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/data/api-repository.test.ts[2m > [22mApiRepository[2m > [22mupdateCustomer throws UnsupportedOperationError without touching fetch
+[41m[1m FAIL [22m[49m src/data/api-repository.test.ts[2m > [22mApiRepository[2m > [22mgetFeatureEntitlements throws UnsupportedOperationError without touching fetch
+[41m[1m FAIL [22m[49m src/data/api-repository.test.ts[2m > [22mApiRepository[2m > [22mlistActivityEvents throws UnsupportedOperationError without touching fetch
+[41m[1m FAIL [22m[49m src/data/api-repository.test.ts[2m > [22mApiRepository[2m > [22mgetTokenBalance throws UnsupportedOperationError without touching fetch
+[31m[1mAssertionError[22m: expected TypeError: Cannot read properties of unde… to match object { name: 'UnsupportedOperationError' }[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- {[39m
+[32m-   "name": "UnsupportedOperationError",[39m
+[31m+ TypeError {[39m
+[31m+   "message": "Cannot read properties of undefined (reading 'ok')",[39m
+[2m  }[22m
+
+[36m [2m❯[22m src/data/api-repository.test.ts:[2m632:36[22m[39m
+    [90m630|[39m     vi[33m.[39m[34mstubGlobal[39m([32m"fetch"[39m[33m,[39m fetchSpy)[33m;[39m
+    [90m631|[39m     [35mconst[39m repository [33m=[39m [35mnew[39m [33mApiRepository[39m()[33m;[39m
+    [90m632|[39m     [35mawait[39m [34mexpect[39m([34minvoke[39m(repository))[33m.[39mrejects[33m.[39m[34mtoMatchObject[39m({
+    [90m   |[39m                                    [31m^[39m
+    [90m633|[39m       name[33m:[39m [32m"UnsupportedOperationError"[39m[33m,[39m
+    [90m634|[39m     })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m10 passed[39m[22m[90m (11)[39m
+[2m      Tests [22m [1m[31m4 failed[39m[22m[2m | [22m[1m[32m387 passed[39m[22m[90m (391)[39m
+[2m   Start at [22m 20:25:18
+[2m   Duration [22m 13.25s[2m (transform 2.39s, setup 1.11s, import 4.82s, tests 13.92s, environment 5.48s)[22m
+
