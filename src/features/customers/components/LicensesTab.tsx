@@ -5,11 +5,24 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/format";
+import {
+    AlertDialog,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 
 export function LicensesTab({ customerId }: { customerId: string }) {
     const repo = useRepository();
     const [licenses, setLicenses] = useState<LicenseDocument[] | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    const [actionDialog, setActionDialog] = useState<{ id: string | null; action: string; title: string; desc: string }>({ id: null, action: "", title: "", desc: "" });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [actionError, setActionError] = useState<string | null>(null);
 
     const load = async () => {
         try {
@@ -24,51 +37,76 @@ export function LicensesTab({ customerId }: { customerId: string }) {
         load();
     }, [customerId]);
 
+    const handleActionClick = (id: string | null, action: string) => {
+        setActionError(null);
+        let title = "";
+        let desc = "";
+
+        if (action === "suspend") {
+            title = "Suspend License";
+            desc = `Are you sure you want to suspend license ${id}? This will block its usage.`;
+        } else if (action === "revoke") {
+            title = "Revoke License";
+            desc = `Are you sure you want to revoke license ${id}? This is irreversible.`;
+        } else if (action === "issue") {
+            title = "Issue New License";
+            desc = "Are you sure you want to issue a new license for this customer? Consequential values will be applied.";
+        }
+
+        setActionDialog({ id, action, title, desc });
+    };
+
+    const confirmAction = async () => {
+        const { id, action } = actionDialog;
+        const key = Date.now().toString();
+        setIsSubmitting(true);
+        setActionError(null);
+
+        try {
+            if (action === "suspend" && id) {
+                await repo.suspendLicense(customerId, id, { idempotencyKey: key, reason: "Operator action" });
+            } else if (action === "revoke" && id) {
+                await repo.revokeLicense(customerId, id, { idempotencyKey: key, reason: "Operator action" });
+            } else if (action === "issue") {
+                await repo.issueLicense(customerId, {
+                    productId: "prod_core",
+                    idempotencyKey: key,
+                    entitlementLimits: { agents: 10 }
+                });
+            }
+
+            toast.success(`License successfully ${action}ed.`);
+            setActionDialog({ ...actionDialog, id: null });
+            load();
+        } catch (e: any) {
+            setActionError(e.message || "Action failed");
+            toast.error(e.message || "Action failed");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDownload = async (licId: string) => {
+        try {
+            const doc = await repo.downloadLicense(customerId, licId);
+            const blob = new Blob([doc], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `license-${licId}.txt`;
+            a.click();
+        } catch (e: any) {
+            toast.error("Failed to download license.");
+        }
+    };
+
     if (error) return <div className="text-red-500">{error}</div>;
     if (!licenses) return <Skeleton className="h-40 w-full" />;
-
-    const handleAction = async (licId: string, action: string) => {
-        const key = Date.now().toString();
-        try {
-            if (action === "suspend") {
-                if (!confirm("Are you sure you want to suspend this license?")) return;
-                await repo.suspendLicense(customerId, licId, { idempotencyKey: key, reason: "Operator action" });
-            } else if (action === "revoke") {
-                if (!confirm("Are you sure you want to revoke this license?")) return;
-                await repo.revokeLicense(customerId, licId, { idempotencyKey: key, reason: "Operator action" });
-            } else if (action === "download") {
-                const doc = await repo.downloadLicense(customerId, licId);
-                const blob = new Blob([doc], { type: "text/plain" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `license-${licId}.txt`;
-                a.click();
-                return;
-            }
-            load();
-        } catch (e) {
-            alert("Action failed");
-        }
-    };
-
-    const handleIssue = async () => {
-        try {
-            await repo.issueLicense(customerId, {
-                productId: "prod_core",
-                idempotencyKey: Date.now().toString(),
-                entitlementLimits: { agents: 10 }
-            });
-            load();
-        } catch (e) {
-            alert("Failed to issue license");
-        }
-    };
 
     return (
         <div className="flex flex-col gap-4">
             <div className="flex justify-end">
-                <Button onClick={handleIssue}>Issue New License</Button>
+                <Button onClick={() => handleActionClick(null, "issue")}>Issue New License</Button>
             </div>
             {licenses.length === 0 ? (
                 <div className="p-4 border rounded text-center">No licenses</div>
@@ -89,14 +127,48 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                     <div className="flex gap-2 mt-4">
                         {lic.status === "active" && (
                             <>
-                                <Button size="sm" variant="outline" onClick={() => handleAction(lic.id, "suspend")}>Suspend</Button>
-                                <Button size="sm" variant="destructive" onClick={() => handleAction(lic.id, "revoke")}>Revoke</Button>
+                                <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "suspend")}>Suspend</Button>
+                                <Button size="sm" variant="destructive" onClick={() => handleActionClick(lic.id, "revoke")}>Revoke</Button>
                             </>
                         )}
-                        <Button size="sm" onClick={() => handleAction(lic.id, "download")}>Download Doc</Button>
+                        <Button size="sm" onClick={() => handleDownload(lic.id)}>Download Doc</Button>
                     </div>
                 </div>
             ))}
+
+            <AlertDialog open={actionDialog.id !== null || actionDialog.action === "issue"} onOpenChange={open => {
+                if (!open && !isSubmitting) setActionDialog({ ...actionDialog, id: null, action: "" });
+            }}>
+                <AlertDialogContent data-testid={`license-${actionDialog.action}-dialog`}>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{actionDialog.title}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {actionDialog.desc}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    {actionError && (
+                        <div className="p-3 bg-red-100 text-red-900 text-sm rounded mt-2 border border-red-200">
+                            {actionError}
+                        </div>
+                    )}
+                    <AlertDialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setActionDialog({ ...actionDialog, id: null, action: "" })}
+                            disabled={isSubmitting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant={["revoke", "suspend"].includes(actionDialog.action) ? "destructive" : "default"}
+                            onClick={confirmAction}
+                            disabled={isSubmitting}
+                        >
+                            {isSubmitting ? "Processing..." : `Confirm ${actionDialog.action}`}
+                        </Button>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

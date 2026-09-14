@@ -113,12 +113,14 @@ describe("CustomerProfilePage", () => {
   it("renders exactly four tabs with the approved labels", async () => {
     await renderProfilePath("/customers/cust_northwind");
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(4);
+    expect(tabs).toHaveLength(6);
     expect(tabs.map((tab) => tab.textContent)).toEqual([
       "Overview",
       "Commercial",
       "Agent Access",
       "Activity",
+      "Requests",
+      "Licenses",
     ]);
   });
 
@@ -141,11 +143,15 @@ describe("CustomerProfilePage", () => {
     expect(screen.getByRole("tab", { name: "Agent Access" })).toHaveFocus();
     await user.keyboard("{ArrowRight}");
     expect(screen.getByRole("tab", { name: "Activity" })).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Requests" })).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Licenses" })).toHaveFocus();
     // Wraps back to the first tab.
     await user.keyboard("{ArrowRight}");
     expect(screen.getByRole("tab", { name: "Overview" })).toHaveFocus();
     await user.keyboard("{ArrowLeft}");
-    expect(screen.getByRole("tab", { name: "Activity" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Licenses" })).toHaveFocus();
   });
 
   it("supports Home and End keyboard navigation", async () => {
@@ -156,7 +162,7 @@ describe("CustomerProfilePage", () => {
     await user.keyboard("{Home}");
     expect(screen.getByRole("tab", { name: "Overview" })).toHaveFocus();
     await user.keyboard("{End}");
-    expect(screen.getByRole("tab", { name: "Activity" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Licenses" })).toHaveFocus();
   });
 
   // -------------------------------------------------------------------------
@@ -945,7 +951,7 @@ describe("CustomerProfilePage", () => {
     expect(statement).toHaveTextContent("Balance 250,000 tokens");
     expect(
       statement.compareDocumentPosition(screen.getByTestId("activity-timeline")) &
-        Node.DOCUMENT_POSITION_FOLLOWING
+      Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
 
     const table = screen.getByRole("table", {
@@ -1569,8 +1575,8 @@ describe("CustomerProfilePage", () => {
           transaction={openingCredit!}
           balanceTokens={0}
           open
-          onOpenChange={() => {}}
-          onSaved={() => {}}
+          onOpenChange={() => { }}
+          onSaved={() => { }}
         />
         <Toaster position="bottom-right" />
       </RepositoryProvider>
@@ -1608,8 +1614,8 @@ describe("CustomerProfilePage", () => {
           transaction={reversal}
           balanceTokens={0}
           open
-          onOpenChange={() => {}}
-          onSaved={() => {}}
+          onOpenChange={() => { }}
+          onSaved={() => { }}
         />
         <Toaster position="bottom-right" />
       </RepositoryProvider>
@@ -1644,8 +1650,8 @@ describe("CustomerProfilePage", () => {
           transaction={openingCredit!}
           balanceTokens={100}
           open
-          onOpenChange={() => {}}
-          onSaved={() => {}}
+          onOpenChange={() => { }}
+          onSaved={() => { }}
         />
         <Toaster position="bottom-right" />
       </RepositoryProvider>
