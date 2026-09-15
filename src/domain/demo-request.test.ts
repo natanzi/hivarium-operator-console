@@ -55,11 +55,12 @@ describe("demo helpers", () => {
       roleTitle: "CTO",
       useCase: "Evaluate agent governance",
       deploymentPreference: "on_premises",
-      expectedAgentCount: "5",
-      requestedAgentIds: ["agent_sentinel"],
-      infrastructureNotes: "",
-      timeline: "",
-      additionalDetails: "",
+    expectedAgentCount: "1-5",
+    requestedAgentIds: ["ai_governance"],
+    technicalRequirements: "",
+    infrastructureNotes: "",
+    timeline: "",
+    additionalDetails: "",
     };
     const proposed = defaultProposedConfig(intake, "2026-09-14T00:00:00.000Z");
     expect(proposed.demoExpiresAt).toBe("2026-10-14T00:00:00.000Z");

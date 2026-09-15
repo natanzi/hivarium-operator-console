@@ -54,6 +54,11 @@ export interface Customer {
   status: CustomerStatus;
   notes: string;
   createdAt: string;
+  originDemoRequestId?: string | null;
+  evaluationExpiresAt?: string | null;
+  evaluationDeploymentModel?: string | null;
+  approvedAgentCapacity?: string | null;
+  portalMembershipStatus?: string | null;
 }
 
 export type PlanTier = "starter" | "growth" | "scale" | "enterprise";

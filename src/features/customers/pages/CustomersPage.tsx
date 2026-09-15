@@ -161,6 +161,50 @@ export function CustomersPage() {
         ),
       },
       {
+        id: "evaluationExpires",
+        header: "Evaluation expiration",
+        cell: (c) => {
+          const expires = c.evaluationExpiresAt ?? related.prepaid.get(c.id)?.arrangement?.expiresAt;
+          return <span className="text-sm">{expires ? formatDate(expires) : "—"}</span>;
+        },
+      },
+      {
+        id: "evalDeployment",
+        header: "Deployment model",
+        cell: (c) => (
+          <span className="text-sm">{c.evaluationDeploymentModel ?? "—"}</span>
+        ),
+      },
+      {
+        id: "agentCapacity",
+        header: "Approved agent capacity",
+        cell: (c) => <span className="text-sm">{c.approvedAgentCapacity ?? "—"}</span>,
+      },
+      {
+        id: "activeAgents",
+        header: "Active agents",
+        cell: (c) => (
+          <span className="text-sm">{related.access.get(c.id)?.current.length ?? 0}</span>
+        ),
+      },
+      {
+        id: "portalMembership",
+        header: "Portal membership",
+        cell: (c) => <span className="text-sm">{c.portalMembershipStatus ?? "—"}</span>,
+      },
+      {
+        id: "originDemo",
+        header: "Demo request",
+        cell: (c) =>
+          c.originDemoRequestId ? (
+            <a className="text-sm underline-offset-4 hover:underline" href={`/demo-requests/${c.originDemoRequestId}`}>
+              {c.originDemoRequestId}
+            </a>
+          ) : (
+            <span className="text-muted-foreground text-sm">—</span>
+          ),
+      },
+      {
         id: "commercial",
         header: "Commercial terms",
         cell: (c) => {

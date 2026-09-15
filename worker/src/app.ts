@@ -100,9 +100,18 @@ export interface Env {
   LANDING_CALLER_TOKEN?: string;
   /** Operator notification recipient for demo intake. */
   OPERATOR_NOTIFY_EMAIL?: string;
+  /** Transactional email provider secret. `test://memory` is tests-only. */
   EMAIL_PROVIDER_API_KEY?: string;
+  /** Sender identity for the provider payload `from` field. */
   EMAIL_FROM_ADDRESS?: string;
+  /** Reply address for the provider payload `reply_to` field. */
+  EMAIL_REPLY_TO?: string;
+  /** Provider HTTP endpoint. Defaults to `https://api.resend.com/emails`. */
   EMAIL_PROVIDER_URL?: string;
+  /** Public Customer Portal origin used in customer emails. Never hardcoded. */
+  CUSTOMER_PORTAL_URL?: string;
+  /** Optional Agent Workspace origin. Omitted from welcome email when unset. */
+  AGENT_WORKSPACE_URL?: string;
   /** Local-only origin for License Service. Never set in production. */
   LICENSE_SERVICE_URL?: string;
   /** Local-only origin for Customer Portal. Never set in production. */

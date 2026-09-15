@@ -104,6 +104,11 @@ interface CustomerRow {
   status: string;
   notes: string;
   created_at: string;
+  origin_demo_request_id?: string | null;
+  evaluation_expires_at?: string | null;
+  evaluation_deployment_model?: string | null;
+  approved_agent_capacity?: string | null;
+  portal_membership_status?: string | null;
 }
 
 interface CommercialArrangementRow {
@@ -223,6 +228,11 @@ function mapCustomer(row: CustomerRow): Customer {
     status: row.status as Customer["status"],
     notes: row.notes,
     createdAt: row.created_at,
+    originDemoRequestId: row.origin_demo_request_id ?? null,
+    evaluationExpiresAt: row.evaluation_expires_at ?? null,
+    evaluationDeploymentModel: row.evaluation_deployment_model ?? null,
+    approvedAgentCapacity: row.approved_agent_capacity ?? null,
+    portalMembershipStatus: row.portal_membership_status ?? null,
   };
 }
 

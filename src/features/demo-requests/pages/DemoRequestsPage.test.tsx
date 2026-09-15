@@ -36,6 +36,8 @@ describe("DemoRequestsPage", () => {
                 organizationName: "Acme Research",
                 applicantName: "Ada Lovelace",
                 applicantEmail: "ada@acme.example",
+                useCase: "Evaluate private agent governance.",
+                expectedAgentCount: "1-5",
                 submittedAt: "2026-09-14T00:00:00.000Z",
                 deploymentPreference: "on_premises",
                 provisioningStatus: "not_started",
@@ -49,6 +51,8 @@ describe("DemoRequestsPage", () => {
     render(<DemoRequestsPage />);
     expect(await screen.findByTestId("demo-row-dreq_1")).toHaveTextContent("Acme Research");
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getByText("ada@acme.example")).toBeInTheDocument();
+    expect(screen.getByText("Review")).toBeInTheDocument();
   });
 
   it("shows an error state with retry", async () => {

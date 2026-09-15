@@ -1,3 +1,5 @@
+export const DEFAULT_EMAIL_PROVIDER_URL = "https://api.resend.com/emails";
+
 export interface EmailMessage {
   to: string;
   subject: string;
@@ -18,22 +20,26 @@ export class MemoryEmailGateway implements EmailGateway {
   }
 }
 
+export interface HttpEmailGatewayConfig {
+  apiKey: string;
+  from: string;
+  replyTo: string;
+  endpoint: string;
+}
+
 export class HttpEmailGateway implements EmailGateway {
-  constructor(
-    private readonly apiKey: string,
-    private readonly from: string,
-    private readonly endpoint: string,
-  ) {}
+  constructor(private readonly config: HttpEmailGatewayConfig) {}
 
   async send(message: EmailMessage): Promise<{ id: string }> {
-    const response = await fetch(this.endpoint, {
+    const response = await fetch(this.config.endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this.config.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: this.from,
+        from: this.config.from,
+        reply_to: this.config.replyTo,
         to: [message.to],
         subject: message.subject,
         text: message.text,
@@ -54,6 +60,24 @@ function escapeText(value: string): string {
       return code === 9 || code === 10 || code === 13 || code >= 32;
     })
     .join("");
+}
+
+/** Public portal origin for customer-facing email copy. Returns null when unset or invalid. */
+export function resolveCustomerPortalUrl(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+    const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
+    return `${parsed.origin}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveOptionalHttpsUrl(value: string | undefined): string | null {
+  return resolveCustomerPortalUrl(value);
 }
 
 export function operatorNotificationEmail(input: {
@@ -97,22 +121,53 @@ export function customerAckEmail(input: { to: string; reference: string; name: s
   };
 }
 
-export function customerWelcomeEmail(input: { to: string; reference: string; name: string }): EmailMessage {
+export function customerWelcomeEmail(input: {
+  to: string;
+  name: string;
+  organization: string;
+  reference: string;
+  proposed: {
+    demoStartAt: string;
+    demoExpiresAt: string;
+    deploymentModel: string;
+    maxAgentCount: string;
+    enabledFeatures: string[];
+    permittedAgentIds: string[];
+  };
+  portalUrl: string | undefined;
+  workspaceUrl: string | undefined;
+}): EmailMessage | null {
+  const portalUrl = resolveCustomerPortalUrl(input.portalUrl);
+  if (!portalUrl) return null;
+  const workspaceUrl = resolveOptionalHttpsUrl(input.workspaceUrl);
+  const lines = [
+    `Hello ${input.name},`,
+    `Your Hivarium evaluation workspace is ready.`,
+    `Organization: ${input.organization}`,
+    `Request reference: ${input.reference}`,
+    `Evaluation status: active`,
+    `Evaluation start: ${input.proposed.demoStartAt}`,
+    `Evaluation expiration: ${input.proposed.demoExpiresAt}`,
+    `Approved deployment model: ${input.proposed.deploymentModel}`,
+    `Approved agent capacity: ${input.proposed.maxAgentCount || "not specified"}`,
+    `Enabled agents/features: ${[...input.proposed.enabledFeatures, ...input.proposed.permittedAgentIds].join(", ") || "evaluation workspace"}`,
+    `Customer Portal: ${portalUrl}`,
+    `Customer Portal purpose: View your organization, evaluation configuration, licenses, usage, access and service requests.`,
+  ];
+  if (workspaceUrl) {
+    lines.push(`Agent Workspace: ${workspaceUrl}`);
+    lines.push(`Agent Workspace purpose: Launch, observe and interact with the agents enabled for your evaluation.`);
+  }
+  lines.push(
+    `Sign in using the same email address that received this message. Cloudflare Access will send a one-time verification code. No password is included in this email.`,
+    `Reply to this message if you need help from Hivarium.`,
+  );
   return {
     to: input.to,
     template: "customer_welcome",
     requestReference: input.reference,
-    subject: `Your Hivarium evaluation workspace is ready (${input.reference})`,
-    text: escapeText(
-      [
-        `Hello ${input.name},`,
-        `Your time-limited Hivarium evaluation workspace is ready.`,
-        `Reference: ${input.reference}`,
-        `Sign in at https://portal.hivarium.dev using the same approved email address (${input.to}).`,
-        `Cloudflare Access will authenticate that email. Portal membership authorizes which workspace you can see.`,
-        `This is a research/evaluation workspace, not a commercial subscription or purchase.`,
-      ].join("\n"),
-    ),
+    subject: "Your Hivarium evaluation workspace is ready",
+    text: escapeText(lines.join("\n")),
   };
 }
 

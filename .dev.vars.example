@@ -8,9 +8,16 @@ PORTAL_CALLER_TOKEN=local-portal-inbound-token
 # LANDING_CALLER_TOKEN must equal Landing OPERATOR_DEMO_INTAKE_TOKEN.
 LANDING_CALLER_TOKEN=local-landing-inbound-token
 OPERATOR_NOTIFY_EMAIL=operators@hivarium.example
-EMAIL_FROM_ADDRESS=noreply@hivarium.example
+EMAIL_FROM_ADDRESS=Hivarium Access <access@hivarium.example>
+EMAIL_REPLY_TO=access@hivarium.example
+# Production expected identities: EMAIL_FROM_ADDRESS=Hivarium Access <access@hivarium.dev>
+# and EMAIL_REPLY_TO=access@hivarium.dev. Do not hardcode those hosts in templates.
+CUSTOMER_PORTAL_URL=https://portal.example.test
+# Optional. If unset, the welcome email omits the Agent Workspace section.
+# AGENT_WORKSPACE_URL=https://agents.example.test
 # Use test://memory for deterministic local tests. Production: transactional provider key.
 EMAIL_PROVIDER_API_KEY=test://memory
+# EMAIL_PROVIDER_URL defaults to https://api.resend.com/emails when unset.
 # EMAIL_PROVIDER_URL=https://api.resend.com/emails
 # Local-only URL overrides. Never set in production; production uses service bindings.
 # LICENSE_SERVICE_URL=http://127.0.0.1:8787

@@ -8,6 +8,8 @@ export interface DemoRequestListItem {
   organizationName: string;
   applicantName: string;
   applicantEmail: string;
+  useCase: string;
+  expectedAgentCount: string;
   submittedAt: string;
   deploymentPreference: DeploymentPreference;
   provisioningStatus: string;
@@ -16,11 +18,16 @@ export interface DemoRequestListItem {
 export interface DemoProposedConfigDto {
   customerName: string;
   customerDomain: string;
+  administratorEmail: string;
   demoStartAt: string;
   demoExpiresAt: string;
   deploymentModel: DeploymentPreference;
+  maxAgentCount: string;
   enabledFeatures: string[];
   permittedAgentIds: string[];
+  tokenAllowance: string;
+  portalAccessEnabled: boolean;
+  workspaceAccessEnabled: boolean;
   capacityNotes: string;
   customerVisibleNotes: string;
   operatorNotes: string;
@@ -43,6 +50,7 @@ export interface DemoRequestDetail {
     deploymentPreference: DeploymentPreference;
     expectedAgentCount: string;
     requestedAgentIds: string[];
+    technicalRequirements: string;
     infrastructureNotes: string;
     timeline: string;
     additionalDetails: string;
@@ -55,6 +63,7 @@ export interface DemoRequestDetail {
     approvedAt: string | null;
     rejectedBy: string | null;
     rejectedAt: string | null;
+    welcomeEmailStatus: string;
   };
   events: Array<{
     occurredAt: string;
@@ -99,7 +108,7 @@ async function readJson<T>(response: Response): Promise<T> {
 export async function listDemoRequests(filters: {
   status?: string;
   q?: string;
-}): Promise<DemoRequestListItem[]> {
+}): Promise<{ items: DemoRequestListItem[]; inboxCount: number }> {
   const params = new URLSearchParams();
   if (filters.status && filters.status !== "all") params.set("status", filters.status);
   if (filters.q) params.set("q", filters.q);
@@ -107,13 +116,24 @@ export async function listDemoRequests(filters: {
   const response = await fetch(`/api/demo-requests${query ? `?${query}` : ""}`, {
     cache: "no-store",
   });
-  const body = await readJson<{ items: DemoRequestListItem[] }>(response);
-  return body.items;
+  const body = await readJson<{ items: DemoRequestListItem[]; inboxCount?: number }>(response);
+  return { items: body.items, inboxCount: body.inboxCount ?? 0 };
 }
 
 export async function getDemoRequest(id: string): Promise<DemoRequestDetail> {
   const response = await fetch(`/api/demo-requests/${encodeURIComponent(id)}`, {
     cache: "no-store",
+  });
+  const body = await readJson<{ request: DemoRequestDetail }>(response);
+  return body.request;
+}
+
+export async function retryWelcomeEmail(id: string, version: number): Promise<DemoRequestDetail> {
+  const response = await fetch(`/api/demo-requests/${encodeURIComponent(id)}/welcome-email`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ version }),
   });
   const body = await readJson<{ request: DemoRequestDetail }>(response);
   return body.request;

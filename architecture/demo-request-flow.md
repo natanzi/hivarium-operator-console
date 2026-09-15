@@ -22,13 +22,13 @@ Landing never writes Operator or Portal D1. Operator never writes Portal D1 dire
 5. Operator starts review, optionally requests information or rejects, then approves.
 6. Approval orchestration (retry-safe):
    - version-check the request;
-   - create or reuse customer id `demo_<requestId>` with evaluation status;
-   - apply prepaid evaluation arrangement, feature entitlements, agent grants;
-   - `PUT` Portal membership;
+   - create or reuse customer id `demo_<requestId>` with evaluation status and origin demo-request link;
+   - apply prepaid evaluation arrangement, feature entitlements, catalog agent grants;
+   - `PUT` Portal membership for the approved administrator email;
    - mark `active` only after mandatory steps succeed;
-   - enqueue welcome email.
+   - send the welcome email only after those steps succeed (outbox + retry).
 7. Portal failure leaves the Operator customer, sets `provisioning_failed`, skips welcome email, and allows Retry.
-8. Customer authenticates at `https://portal.hivarium.dev` via Cloudflare Access. Membership, not the Access JWT alone, authorizes tenant data.
+8. Customer authenticates at `CUSTOMER_PORTAL_URL` (and `AGENT_WORKSPACE_URL` when configured) via Cloudflare Access. Membership, not the Access JWT alone, authorizes tenant data.
 
 ## Bindings and directional secrets
 
@@ -37,8 +37,10 @@ Landing never writes Operator or Portal D1. Operator never writes Portal D1 dire
 | Landing | `OPERATOR_SERVICE` + `OPERATOR_DEMO_INTAKE_TOKEN` | Operator `LANDING_CALLER_TOKEN` |
 | Landing | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile siteverify |
 | Operator | `CUSTOMER_PORTAL_SERVICE` + `PORTAL_SERVICE_TOKEN` | Portal `OPERATOR_CALLER_TOKEN` |
-| Operator | `EMAIL_PROVIDER_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_PROVIDER_URL` | transactional email |
+| Operator | `EMAIL_PROVIDER_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_TO`, `EMAIL_PROVIDER_URL` | transactional email (Resend-compatible) |
 | Operator | `OPERATOR_NOTIFY_EMAIL` | operator notification recipient |
+| Operator | `CUSTOMER_PORTAL_URL` | public Customer Portal origin in customer emails |
+| Operator | `AGENT_WORKSPACE_URL` | optional Agent Workspace origin; omitted from email when unset |
 | Portal | `OPERATOR_CALLER_TOKEN` | inbound Operator membership PUT |
 | Portal | existing Access vars | Cloudflare Access JWT verification |
 

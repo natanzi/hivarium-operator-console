@@ -55,6 +55,7 @@ export function AppSidebar({ className }: SidebarProps) {
   const [operator, setOperator] = useState<OperatorState>({
     status: "loading",
   });
+  const [inboxCount, setInboxCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +72,13 @@ export function AppSidebar({ className }: SidebarProps) {
           setOperator({ status: "error" });
         }
       });
+    fetch("/api/demo-requests", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json()) as { inboxCount?: number };
+        if (!cancelled) setInboxCount(body.inboxCount ?? 0);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -106,7 +114,7 @@ export function AppSidebar({ className }: SidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu>
               {NAV_LINKS.map((link) => (
-                <NavLinkItem key={link.to} link={link} />
+                <NavLinkItem key={link.to} link={link} inboxCount={inboxCount} />
               ))}
             </SidebarMenu>
           </SidebarGroupContent>
@@ -191,7 +199,7 @@ function OperatorFooter({ state }: { state: OperatorState }) {
   );
 }
 
-function NavLinkItem({ link }: { link: NavLink }) {
+function NavLinkItem({ link, inboxCount }: { link: NavLink; inboxCount: number }) {
   const Icon = link.icon;
   return (
     <SidebarMenuItem>
@@ -203,6 +211,11 @@ function NavLinkItem({ link }: { link: NavLink }) {
         >
           <Icon className="size-4 shrink-0 opacity-70" />
           <span>{link.label}</span>
+          {link.to === "/demo-requests" && inboxCount > 0 ? (
+            <Badge variant="outline" className="ml-auto h-5 px-1.5 text-[10px]" data-testid="demo-inbox-badge">
+              {inboxCount}
+            </Badge>
+          ) : null}
           {link.to === "/agents" && (
             <Badge variant="outline" className="ml-auto h-5 px-1.5 text-[10px]">
               read-only

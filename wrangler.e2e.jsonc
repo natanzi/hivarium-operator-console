@@ -8,7 +8,9 @@
   "compatibility_date": "2024-05-03",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "run_worker_first": true
   },
   // D1 durable store owned by the Worker API (D-01). The database_id below is
   // a local placeholder; replace it with the real D1 database id
@@ -28,9 +30,13 @@
     "ACCESS_TEAM_DOMAIN": "example.cloudflareaccess.com",
     "ACCESS_AUD": "replace-with-access-application-aud",
     "AUTHORIZED_OPERATOR_EMAIL": "operator@hivarium.test",
-    // E2E-only: enables the deterministic test identity and the
-    // POST /api/e2e/reset reseed route in worker/test/e2e-entry.ts.
-    "E2E_TEST_AUTH": "true"
+    "E2E_TEST_AUTH": "true",
+    "LANDING_CALLER_TOKEN": "e2e-landing-in",
+    "PORTAL_SERVICE_TOKEN": "e2e-portal-out",
+    "EMAIL_PROVIDER_API_KEY": "test://memory",
+    "EMAIL_FROM_ADDRESS": "Hivarium Access <access@hivarium.dev>",
+    "EMAIL_REPLY_TO": "access@hivarium.dev",
+    "OPERATOR_NOTIFY_EMAIL": "ops@hivarium.test"
   },
   // Resolve the SPA's "@/*" import alias inside the Worker bundle so the
   // shared domain rules and deterministic seed can be imported by relative

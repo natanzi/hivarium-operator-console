@@ -32,6 +32,7 @@ import {
   buildAuditEntry,
   commitStoreDiff,
   diffStores,
+  seedCatalog,
 } from "../src/db";
 import type { DataStore } from "../../src/domain/types";
 
@@ -123,6 +124,10 @@ async function e2eResetInterceptApi(
     await env.DB.prepare(stmt).run();
   }
 
+  // Catalog rows are not part of StoreDiff. Seed them first so grant/usage
+  // foreign keys succeed on a freshly migrated local D1.
+  await seedCatalog(env.DB);
+
   // Re-seed using the canonical utility.
   const diff = diffStores(emptyStore(), buildSeedStore());
   await commitStoreDiff(
@@ -200,6 +205,33 @@ const app = createApp<E2EEnv>({
   authenticate: e2eAuthenticate,
 });
 
+function stubService(body: unknown): Fetcher {
+  return {
+    fetch: async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+  } as Fetcher;
+}
+
+function withE2EBindings(env: E2EEnv): E2EEnv {
+  return {
+    ...env,
+    PORTAL_SERVICE_TOKEN: env.PORTAL_SERVICE_TOKEN || "e2e-portal-out",
+    LANDING_CALLER_TOKEN: env.LANDING_CALLER_TOKEN || "e2e-landing-in",
+    EMAIL_PROVIDER_API_KEY: env.EMAIL_PROVIDER_API_KEY || "test://memory",
+    EMAIL_FROM_ADDRESS: env.EMAIL_FROM_ADDRESS || "Hivarium Access <access@hivarium.dev>",
+    EMAIL_REPLY_TO: env.EMAIL_REPLY_TO || "access@hivarium.dev",
+    LICENSE_SERVICE_URL: "",
+    CUSTOMER_PORTAL_SERVICE_URL: "",
+    LICENSE_SERVICE: stubService({}),
+    CUSTOMER_PORTAL_SERVICE: stubService({ membershipId: "mbr_e2e", replayed: false }),
+  };
+}
+
 export default {
-  fetch: app.fetch,
+  fetch(request, env, ctx) {
+    return app.fetch(request, withE2EBindings(env), ctx);
+  },
 } satisfies ExportedHandler<E2EEnv>;

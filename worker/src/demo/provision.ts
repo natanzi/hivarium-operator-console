@@ -7,6 +7,7 @@ import {
   commitStoreDiff,
   diffStores,
   getCustomer,
+  listAgentProducts,
   loadCustomerStore,
   seedCatalog,
 } from "../db";
@@ -24,12 +25,12 @@ import { drainEmailOutbox } from "./outbox";
 import {
   enqueueEmail,
   getDemoRequest,
+  getEmailOutboxRow,
   proposedFromRecord,
   updateDemoRequestVersioned,
   upsertProvisioningJob,
   type DemoRequestRecord,
 } from "./store";
-
 function portalAdapter(env: Env): PortalAdapter {
   return new PortalAdapter(env.CUSTOMER_PORTAL_SERVICE, env.PORTAL_SERVICE_TOKEN, env.CUSTOMER_PORTAL_SERVICE_URL);
 }
@@ -117,15 +118,16 @@ export async function provisionDemoRequest(
     await markJob(env, current.id, "operator_customer", "pending", "", correlationId);
     await seedCatalog(env.DB);
     const existing = await getCustomer(env.DB, customerId);
+    const catalogIds = new Set((await listAgentProducts(env.DB)).map((product) => product.id));
     if (!existing) {
       const customer: Customer = {
         id: customerId,
         name: proposed.customerName,
         domain: proposed.customerDomain,
         contact: current.applicantName,
-        email: current.applicantEmail,
+        email: proposed.administratorEmail || current.applicantEmail,
         status: "evaluation",
-        notes: `Evaluation workspace for ${current.publicReference}. Not a commercial contract.`,
+        notes: `Evaluation workspace for ${current.publicReference}. Originating demo request ${current.id}. Not a commercial contract.`,
         createdAt: now,
       };
       const arrangement: PrepaidCommercialArrangement = {
@@ -140,9 +142,14 @@ export async function provisionDemoRequest(
         model: "prepaid",
         warningThresholdTokens: 0,
         expiresAt: proposed.demoExpiresAt,
-        notes: proposed.capacityNotes,
+        notes: [proposed.capacityNotes, proposed.tokenAllowance ? `Token allowance: ${proposed.tokenAllowance}` : ""]
+          .filter(Boolean)
+          .join("\n"),
       };
-      const features: FeatureEntitlement[] = proposed.enabledFeatures.map((feature) => ({
+      const capabilityFeatures = proposed.permittedAgentIds
+        .filter((id) => !catalogIds.has(id))
+        .map((id) => `capability:${id}`);
+      const features: FeatureEntitlement[] = [...proposed.enabledFeatures, ...capabilityFeatures].map((feature) => ({
         id: `feat_${customerId}_${feature}`,
         customerId,
         feature,
@@ -152,7 +159,7 @@ export async function provisionDemoRequest(
       }));
       const grants: AgentAccessGrant[] = [];
       const events: ActivityEvent[] = [];
-      for (const agentProductId of proposed.permittedAgentIds) {
+      for (const agentProductId of proposed.permittedAgentIds.filter((id) => catalogIds.has(id))) {
         const grantId = `ag_${customerId}_${agentProductId}`;
         const eventId = `act_${grantId}`;
         events.push({
@@ -219,18 +226,28 @@ export async function provisionDemoRequest(
           ),
         );
       }
+      await env.DB.prepare(
+        `UPDATE customers SET origin_demo_request_id = ?, evaluation_expires_at = ?, evaluation_deployment_model = ?, approved_agent_capacity = ?, portal_membership_status = ? WHERE id = ?`,
+      )
+        .bind(current.id, proposed.demoExpiresAt, proposed.deploymentModel, proposed.maxAgentCount, "pending", customerId)
+        .run();
     }
     await markJob(env, current.id, "operator_customer", "succeeded", "", correlationId);
 
     await markJob(env, current.id, "portal_membership", "pending", "", correlationId);
-    await portalAdapter(env).provisionMembership(customerId, current.applicantEmail, {
-      displayName: current.applicantName,
-      role: "customer_admin",
-      status: "active",
-      demoExpiresAt: proposed.demoExpiresAt,
-      correlationId,
-      idempotencyKey: `mbr-${current.id}`,
-    });
+    if (proposed.portalAccessEnabled) {
+      await portalAdapter(env).provisionMembership(customerId, proposed.administratorEmail || current.applicantEmail, {
+        displayName: current.applicantName,
+        role: "customer_admin",
+        status: "active",
+        demoExpiresAt: proposed.demoExpiresAt,
+        correlationId,
+        idempotencyKey: `mbr-${current.id}`,
+      });
+    }
+    await env.DB.prepare("UPDATE customers SET portal_membership_status = ? WHERE id = ?")
+      .bind(proposed.portalAccessEnabled ? "active" : "disabled", customerId)
+      .run();
     await markJob(env, current.id, "portal_membership", "succeeded", "", correlationId);
 
     const active: DemoRequestRecord = {
@@ -238,6 +255,7 @@ export async function provisionDemoRequest(
       status: "active",
       provisioningStatus: "succeeded",
       provisionedCustomerId: customerId,
+      welcomeEmailStatus: "pending",
       updatedAt: new Date().toISOString(),
       version: current.version + 1,
     };
@@ -257,18 +275,40 @@ export async function provisionDemoRequest(
       id: newId("eml"),
       requestId: current.id,
       template: "customer_welcome",
-      toEmail: current.applicantEmail,
+      toEmail: proposed.administratorEmail || current.applicantEmail,
       idempotencyKey: `welcome-${current.id}`,
       createdAt: active.updatedAt,
     });
     await drainEmailOutbox(env, {
       customer_welcome: customerWelcomeEmail({
-        to: current.applicantEmail,
-        reference: current.publicReference,
+        to: proposed.administratorEmail || current.applicantEmail,
         name: current.applicantName,
+        organization: proposed.customerName,
+        reference: current.publicReference,
+        proposed,
+        portalUrl: env.CUSTOMER_PORTAL_URL,
+        workspaceUrl: env.AGENT_WORKSPACE_URL,
       }),
     });
-    return (await getDemoRequest(env.DB, current.id)) ?? active;
+    const outbox = await getEmailOutboxRow(env.DB, current.id, "customer_welcome");
+    const welcomeStatus = outbox?.status === "sent" ? "sent" : "failed";
+    const afterEmail: DemoRequestRecord = {
+      ...active,
+      welcomeEmailStatus: welcomeStatus,
+      updatedAt: new Date().toISOString(),
+      version: active.version + 1,
+    };
+    await updateDemoRequestVersioned(env.DB, active, afterEmail, {
+      id: newId("devent"),
+      requestId: current.id,
+      occurredAt: afterEmail.updatedAt,
+      principal: identity.email,
+      action: welcomeStatus === "sent" ? "demo.welcome_email_sent" : "demo.welcome_email_failed",
+      correlationId,
+      idempotencyHash: await sha256Hex(`${idempotencyKey}:welcome`),
+      metadata: { status: welcomeStatus },
+    });
+    return (await getDemoRequest(env.DB, current.id)) ?? afterEmail;
   } catch (error) {
     const code = error instanceof ApiError ? error.code : "provisioning_failed";
     await markJob(env, current.id, "portal_membership", "failed", code, correlationId);

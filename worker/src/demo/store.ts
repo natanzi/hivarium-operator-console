@@ -20,6 +20,7 @@ export interface DemoRequestRecord {
   deploymentPreference: DeploymentPreference;
   expectedAgentCount: string;
   requestedAgentIds: string[];
+  technicalRequirements: string;
   infrastructureNotes: string;
   timeline: string;
   additionalDetails: string;
@@ -27,14 +28,20 @@ export interface DemoRequestRecord {
   customerVisibleNotes: string;
   proposedCustomerName: string;
   proposedCustomerDomain: string;
+  proposedAdministratorEmail: string;
   proposedDeploymentModel: DeploymentPreference;
   proposedFeatures: string[];
   proposedAgentIds: string[];
   proposedCapacityNotes: string;
+  proposedMaxAgentCount: string;
+  proposedTokenAllowance: string;
+  proposedPortalAccess: boolean;
+  proposedWorkspaceAccess: boolean;
   demoStartAt: string;
   demoExpiresAt: string;
   provisioningStatus: string;
   provisionedCustomerId: string | null;
+  welcomeEmailStatus: string;
   approvedBy: string | null;
   approvedAt: string | null;
   rejectedBy: string | null;
@@ -70,6 +77,7 @@ interface DemoRequestRow {
   deployment_preference: string;
   expected_agent_count: string;
   requested_agent_ids_json: string;
+  technical_requirements?: string;
   infrastructure_notes: string;
   timeline: string;
   additional_details: string;
@@ -77,14 +85,20 @@ interface DemoRequestRow {
   customer_visible_notes: string;
   proposed_customer_name: string;
   proposed_customer_domain: string;
+  proposed_admin_email?: string;
   proposed_deployment_model: string;
   proposed_features_json: string;
   proposed_agent_ids_json: string;
   proposed_capacity_notes: string;
+  proposed_max_agent_count?: string;
+  proposed_token_allowance?: string;
+  proposed_portal_access?: number;
+  proposed_workspace_access?: number;
   demo_start_at: string;
   demo_expires_at: string;
   provisioning_status: string;
   provisioned_customer_id: string | null;
+  welcome_email_status?: string;
   approved_by: string | null;
   approved_at: string | null;
   rejected_by: string | null;
@@ -120,6 +134,7 @@ export function mapDemoRequest(row: DemoRequestRow): DemoRequestRecord {
     deploymentPreference: row.deployment_preference as DeploymentPreference,
     expectedAgentCount: row.expected_agent_count,
     requestedAgentIds: parseJsonArray(row.requested_agent_ids_json),
+    technicalRequirements: row.technical_requirements ?? "",
     infrastructureNotes: row.infrastructure_notes,
     timeline: row.timeline,
     additionalDetails: row.additional_details,
@@ -127,14 +142,20 @@ export function mapDemoRequest(row: DemoRequestRow): DemoRequestRecord {
     customerVisibleNotes: row.customer_visible_notes,
     proposedCustomerName: row.proposed_customer_name,
     proposedCustomerDomain: row.proposed_customer_domain,
+    proposedAdministratorEmail: row.proposed_admin_email || row.applicant_email,
     proposedDeploymentModel: row.proposed_deployment_model as DeploymentPreference,
     proposedFeatures: parseJsonArray(row.proposed_features_json),
     proposedAgentIds: parseJsonArray(row.proposed_agent_ids_json),
     proposedCapacityNotes: row.proposed_capacity_notes,
+    proposedMaxAgentCount: row.proposed_max_agent_count || row.expected_agent_count,
+    proposedTokenAllowance: row.proposed_token_allowance ?? "",
+    proposedPortalAccess: row.proposed_portal_access !== 0,
+    proposedWorkspaceAccess: row.proposed_workspace_access === 1,
     demoStartAt: row.demo_start_at,
     demoExpiresAt: row.demo_expires_at,
     provisioningStatus: row.provisioning_status,
     provisionedCustomerId: row.provisioned_customer_id,
+    welcomeEmailStatus: row.welcome_email_status ?? "not_started",
     approvedBy: row.approved_by,
     approvedAt: row.approved_at,
     rejectedBy: row.rejected_by,
@@ -149,11 +170,16 @@ export function proposedFromRecord(row: DemoRequestRecord): DemoProposedConfig {
   return {
     customerName: row.proposedCustomerName,
     customerDomain: row.proposedCustomerDomain,
+    administratorEmail: row.proposedAdministratorEmail,
     demoStartAt: row.demoStartAt,
     demoExpiresAt: row.demoExpiresAt,
     deploymentModel: row.proposedDeploymentModel,
+    maxAgentCount: row.proposedMaxAgentCount,
     enabledFeatures: row.proposedFeatures,
     permittedAgentIds: row.proposedAgentIds,
+    tokenAllowance: row.proposedTokenAllowance,
+    portalAccessEnabled: row.proposedPortalAccess,
+    workspaceAccessEnabled: row.proposedWorkspaceAccess,
     capacityNotes: row.proposedCapacityNotes,
     customerVisibleNotes: row.customerVisibleNotes,
     operatorNotes: row.operatorNotes,
@@ -215,13 +241,14 @@ export async function insertDemoRequest(
           id, public_reference, status, submitted_at, updated_at,
           applicant_name, applicant_email, organization_name, organization_domain,
           role_title, use_case, deployment_preference, expected_agent_count,
-          requested_agent_ids_json, infrastructure_notes, timeline, additional_details,
+          requested_agent_ids_json, technical_requirements, infrastructure_notes, timeline, additional_details,
           operator_notes, customer_visible_notes, proposed_customer_name, proposed_customer_domain,
-          proposed_deployment_model, proposed_features_json, proposed_agent_ids_json,
-          proposed_capacity_notes, demo_start_at, demo_expires_at, provisioning_status,
-          provisioned_customer_id, approved_by, approved_at, rejected_by, rejected_at,
+          proposed_admin_email, proposed_deployment_model, proposed_features_json, proposed_agent_ids_json,
+          proposed_capacity_notes, proposed_max_agent_count, proposed_token_allowance,
+          proposed_portal_access, proposed_workspace_access, demo_start_at, demo_expires_at, provisioning_status,
+          provisioned_customer_id, welcome_email_status, approved_by, approved_at, rejected_by, rejected_at,
           version, intake_idempotency_key, intake_body_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.id,
@@ -238,6 +265,7 @@ export async function insertDemoRequest(
         record.deploymentPreference,
         record.expectedAgentCount,
         JSON.stringify(record.requestedAgentIds),
+        record.technicalRequirements,
         record.infrastructureNotes,
         record.timeline,
         record.additionalDetails,
@@ -245,14 +273,20 @@ export async function insertDemoRequest(
         record.customerVisibleNotes,
         record.proposedCustomerName,
         record.proposedCustomerDomain,
+        record.proposedAdministratorEmail,
         record.proposedDeploymentModel,
         JSON.stringify(record.proposedFeatures),
         JSON.stringify(record.proposedAgentIds),
         record.proposedCapacityNotes,
+        record.proposedMaxAgentCount,
+        record.proposedTokenAllowance,
+        record.proposedPortalAccess ? 1 : 0,
+        record.proposedWorkspaceAccess ? 1 : 0,
         record.demoStartAt,
         record.demoExpiresAt,
         record.provisioningStatus,
         record.provisionedCustomerId,
+        record.welcomeEmailStatus,
         record.approvedBy,
         record.approvedAt,
         record.rejectedBy,
@@ -323,9 +357,13 @@ export async function updateDemoRequestVersioned(
     .prepare(
       `UPDATE demo_requests SET
         status = ?, updated_at = ?, operator_notes = ?, customer_visible_notes = ?,
-        proposed_customer_name = ?, proposed_customer_domain = ?, proposed_deployment_model = ?,
+        proposed_customer_name = ?, proposed_customer_domain = ?, proposed_admin_email = ?,
+        proposed_deployment_model = ?,
         proposed_features_json = ?, proposed_agent_ids_json = ?, proposed_capacity_notes = ?,
+        proposed_max_agent_count = ?, proposed_token_allowance = ?, proposed_portal_access = ?,
+        proposed_workspace_access = ?,
         demo_start_at = ?, demo_expires_at = ?, provisioning_status = ?, provisioned_customer_id = ?,
+        welcome_email_status = ?,
         approved_by = ?, approved_at = ?, rejected_by = ?, rejected_at = ?, version = ?
        WHERE id = ? AND version = ?`,
     )
@@ -336,14 +374,20 @@ export async function updateDemoRequestVersioned(
       next.customerVisibleNotes,
       next.proposedCustomerName,
       next.proposedCustomerDomain,
+      next.proposedAdministratorEmail,
       next.proposedDeploymentModel,
       JSON.stringify(next.proposedFeatures),
       JSON.stringify(next.proposedAgentIds),
       next.proposedCapacityNotes,
+      next.proposedMaxAgentCount,
+      next.proposedTokenAllowance,
+      next.proposedPortalAccess ? 1 : 0,
+      next.proposedWorkspaceAccess ? 1 : 0,
       next.demoStartAt,
       next.demoExpiresAt,
       next.provisioningStatus,
       next.provisionedCustomerId,
+      next.welcomeEmailStatus,
       next.approvedBy,
       next.approvedAt,
       next.rejectedBy,
@@ -441,6 +485,22 @@ export function publicReferenceFromId(id: string): string {
   return `HV-DEMO-${compact || "00000000"}`;
 }
 
+export async function countDemoInbox(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) as n FROM demo_requests WHERE status IN ('submitted', 'under_review')")
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+export async function getEmailOutboxRow(db: D1Database, requestId: string, template: string) {
+  return db
+    .prepare(
+      "SELECT status, last_error_code FROM demo_email_outbox WHERE request_id = ? AND template = ? ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(requestId, template)
+    .first<{ status: string; last_error_code: string }>();
+}
+
 export function intakeFromRecord(record: DemoRequestRecord): DemoIntakePayload {
   return {
     applicantName: record.applicantName,
@@ -452,6 +512,7 @@ export function intakeFromRecord(record: DemoRequestRecord): DemoIntakePayload {
     deploymentPreference: record.deploymentPreference,
     expectedAgentCount: record.expectedAgentCount,
     requestedAgentIds: record.requestedAgentIds,
+    technicalRequirements: record.technicalRequirements,
     infrastructureNotes: record.infrastructureNotes,
     timeline: record.timeline,
     additionalDetails: record.additionalDetails,

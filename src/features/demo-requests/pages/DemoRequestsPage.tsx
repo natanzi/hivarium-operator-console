@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DEMO_REQUEST_STATUSES } from "@/domain/demo-request";
 import { formatDate } from "@/lib/format";
 import { listDemoRequests, type DemoRequestListItem } from "../demo-api";
-import { DEMO_STATUS_LABELS, DEPLOYMENT_LABELS } from "../labels";
+import { DEMO_STATUS_LABELS, DEPLOYMENT_LABELS, AGENT_COUNT_LABELS } from "../labels";
 
 export function DemoRequestsPage() {
   const [items, setItems] = useState<DemoRequestListItem[] | null>(null);
@@ -19,7 +19,7 @@ export function DemoRequestsPage() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      setItems(await listDemoRequests({ status, q: search.trim() || undefined }));
+      setItems((await listDemoRequests({ status, q: search.trim() || undefined })).items);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Could not load demo requests.");
     }
@@ -30,7 +30,7 @@ export function DemoRequestsPage() {
   }, [load]);
 
   return (
-    <div>
+    <div className="overflow-x-hidden">
       <PageHeader
         title="Demo Requests"
         description="Review evaluation requests submitted from hivarium.dev. Approval provisions a time-limited research workspace, not a commercial contract."
@@ -85,33 +85,42 @@ export function DemoRequestsPage() {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
+          <table className="w-full min-w-[960px] text-left text-sm">
             <caption className="sr-only">Demo evaluation requests</caption>
             <thead>
               <tr className="border-b">
                 <th className="py-2 font-medium">Organization</th>
                 <th className="py-2 font-medium">Applicant</th>
-                <th className="py-2 font-medium">Submitted</th>
+                <th className="py-2 font-medium">Work email</th>
+                <th className="py-2 font-medium">Use case</th>
+                <th className="py-2 font-medium">Expected agents</th>
                 <th className="py-2 font-medium">Deployment</th>
+                <th className="py-2 font-medium">Submitted</th>
                 <th className="py-2 font-medium">Status</th>
+                <th className="py-2 font-medium">Action</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item) => (
                 <tr key={item.id} data-testid={`demo-row-${item.id}`} className="border-b">
                   <td className="py-3">
-                    <a className="font-medium underline-offset-4 hover:underline" href={`/demo-requests/${item.id}`}>
-                      {item.organizationName}
-                    </a>
+                    <div className="font-medium">{item.organizationName}</div>
                     <div className="text-muted-foreground text-xs">{item.publicReference}</div>
                   </td>
-                  <td className="py-3">
-                    <div>{item.applicantName}</div>
-                    <div className="text-muted-foreground text-xs">{item.applicantEmail}</div>
+                  <td className="py-3">{item.applicantName}</td>
+                  <td className="py-3">{item.applicantEmail}</td>
+                  <td className="max-w-[180px] truncate py-3" title={item.useCase}>
+                    {item.useCase}
                   </td>
-                  <td className="py-3">{formatDate(item.submittedAt)}</td>
+                  <td className="py-3">{AGENT_COUNT_LABELS[item.expectedAgentCount] ?? item.expectedAgentCount}</td>
                   <td className="py-3">{DEPLOYMENT_LABELS[item.deploymentPreference]}</td>
+                  <td className="py-3">{formatDate(item.submittedAt)}</td>
                   <td className="py-3">{DEMO_STATUS_LABELS[item.status]}</td>
+                  <td className="py-3">
+                    <a className="font-medium underline-offset-4 hover:underline" href={`/demo-requests/${item.id}`}>
+                      Review
+                    </a>
+                  </td>
                 </tr>
               ))}
             </tbody>

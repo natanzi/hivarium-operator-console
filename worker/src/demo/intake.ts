@@ -2,7 +2,6 @@ import { ApiError } from "../app";
 import type { Env } from "../app";
 import {
   defaultProposedConfig,
-  domainFromEmail,
   isDeploymentPreference,
   normalizeEmail,
   type DemoIntakePayload,
@@ -72,24 +71,21 @@ export function parseIntakePayload(body: Record<string, unknown>): DemoIntakePay
         .filter(Boolean)
         .slice(0, MAX.agents)
     : [];
-  if (requestedAgentIds.some((id) => id.length > MAX.agentId)) {
+  if (requestedAgentIds.length === 0 || requestedAgentIds.some((id) => id.length > MAX.agentId)) {
     throw new ApiError(400, "validation-error", "requestedAgentIds is invalid.");
   }
-  const organizationDomain =
-    bounded(body.organizationDomain, MAX.domain) || domainFromEmail(applicantEmail);
-  if (!organizationDomain) {
-    throw new ApiError(400, "validation-error", "organizationDomain is required.");
-  }
+  const organizationDomain = requireBounded(body.organizationDomain, "organizationDomain", MAX.domain).toLowerCase();
   return {
     applicantName: requireBounded(body.applicantName ?? body.fullName, "applicantName", MAX.name),
     applicantEmail,
     organizationName: requireBounded(body.organizationName ?? body.organization, "organizationName", MAX.org),
     organizationDomain: organizationDomain.toLowerCase(),
-    roleTitle: bounded(body.roleTitle, MAX.role),
+    roleTitle: requireBounded(body.roleTitle, "roleTitle", MAX.role),
     useCase: requireBounded(body.useCase, "useCase", MAX.useCase),
     deploymentPreference,
-    expectedAgentCount: bounded(body.expectedAgentCount, MAX.count),
+    expectedAgentCount: requireBounded(body.expectedAgentCount, "expectedAgentCount", MAX.count),
     requestedAgentIds,
+    technicalRequirements: bounded(body.technicalRequirements, MAX.notes),
     infrastructureNotes: bounded(body.infrastructureNotes, MAX.notes),
     timeline: bounded(body.timeline, MAX.timeline),
     additionalDetails: bounded(body.additionalDetails, MAX.notes),
@@ -133,6 +129,7 @@ export async function intakeDemoRequest(
     deploymentPreference: intake.deploymentPreference,
     expectedAgentCount: intake.expectedAgentCount,
     requestedAgentIds: intake.requestedAgentIds,
+    technicalRequirements: intake.technicalRequirements,
     infrastructureNotes: intake.infrastructureNotes,
     timeline: intake.timeline,
     additionalDetails: intake.additionalDetails,
@@ -140,14 +137,20 @@ export async function intakeDemoRequest(
     customerVisibleNotes: "",
     proposedCustomerName: proposed.customerName,
     proposedCustomerDomain: proposed.customerDomain,
+    proposedAdministratorEmail: proposed.administratorEmail,
     proposedDeploymentModel: proposed.deploymentModel,
     proposedFeatures: proposed.enabledFeatures,
     proposedAgentIds: proposed.permittedAgentIds,
     proposedCapacityNotes: proposed.capacityNotes,
+    proposedMaxAgentCount: proposed.maxAgentCount,
+    proposedTokenAllowance: proposed.tokenAllowance,
+    proposedPortalAccess: proposed.portalAccessEnabled,
+    proposedWorkspaceAccess: proposed.workspaceAccessEnabled,
     demoStartAt: proposed.demoStartAt,
     demoExpiresAt: proposed.demoExpiresAt,
     provisioningStatus: "not_started",
     provisionedCustomerId: null,
+    welcomeEmailStatus: "not_started",
     approvedBy: null,
     approvedAt: null,
     rejectedBy: null,
@@ -171,27 +174,35 @@ export async function intakeDemoRequest(
   await enqueueEmail(env.DB, {
     id: newId("eml"),
     requestId: id,
-    template: "operator_notification",
-    toEmail: env.OPERATOR_NOTIFY_EMAIL || "operators@hivarium.dev",
-    idempotencyKey: `notify-${id}`,
-    createdAt: now,
-  });
-  await enqueueEmail(env.DB, {
-    id: newId("eml"),
-    requestId: id,
     template: "customer_ack",
     toEmail: intake.applicantEmail,
     idempotencyKey: `ack-${id}`,
     createdAt: now,
   });
 
+  const operatorNotify = env.OPERATOR_NOTIFY_EMAIL?.trim();
+  if (operatorNotify) {
+    await enqueueEmail(env.DB, {
+      id: newId("eml"),
+      requestId: id,
+      template: "operator_notification",
+      toEmail: operatorNotify,
+      idempotencyKey: `notify-${id}`,
+      createdAt: now,
+    });
+  }
+
   await drainEmailOutbox(env, {
-    operator_notification: operatorNotificationEmail({
-      to: env.OPERATOR_NOTIFY_EMAIL || "operators@hivarium.dev",
-      reference: record.publicReference,
-      organization: record.organizationName,
-      applicantEmail: record.applicantEmail,
-    }),
+    ...(operatorNotify
+      ? {
+          operator_notification: operatorNotificationEmail({
+            to: operatorNotify,
+            reference: record.publicReference,
+            organization: record.organizationName,
+            applicantEmail: record.applicantEmail,
+          }),
+        }
+      : {}),
     customer_ack: customerAckEmail({
       to: intake.applicantEmail,
       reference: record.publicReference,

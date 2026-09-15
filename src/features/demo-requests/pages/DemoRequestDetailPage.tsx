@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
 
@@ -11,13 +11,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DEPLOYMENT_PREFERENCES } from "@/domain/demo-request";
 import {
   getDemoRequest,
+  retryWelcomeEmail,
   saveDemoConfiguration,
   transitionDemoRequest,
   type DemoProposedConfigDto,
   type DemoRequestDetail,
 } from "../demo-api";
 import { DemoActionDialog } from "../components/DemoActionDialog";
-import { DEMO_STATUS_LABELS, DEPLOYMENT_LABELS } from "../labels";
+import { CAPABILITY_LABELS, DEMO_STATUS_LABELS, DEPLOYMENT_LABELS } from "../labels";
 
 export function DemoRequestDetailPage() {
   const { requestId = "" } = useParams();
@@ -25,6 +26,7 @@ export function DemoRequestDetailPage() {
   const [proposed, setProposed] = useState<DemoProposedConfigDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const detailRef = useRef<DemoRequestDetail | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -41,11 +43,16 @@ export function DemoRequestDetailPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
+
   async function save() {
-    if (!detail || !proposed) return;
+    const current = detailRef.current;
+    if (!current || !proposed) return;
     setSaving(true);
     try {
-      const next = await saveDemoConfiguration(detail.id, detail.version, proposed);
+      const next = await saveDemoConfiguration(current.id, current.version, proposed);
       setDetail(next);
       setProposed(next.proposed);
       toast.success("Proposed configuration saved");
@@ -60,9 +67,10 @@ export function DemoRequestDetailPage() {
     action: "start_review" | "needs_information" | "reject" | "approve" | "retry",
     note: string,
   ) {
-    if (!detail) return;
+    const current = detailRef.current;
+    if (!current) return;
     try {
-      const next = await transitionDemoRequest(detail.id, action, detail.version, note);
+      const next = await transitionDemoRequest(current.id, action, current.version, note);
       setDetail(next);
       setProposed(next.proposed);
       toast.success("Demo request updated");
@@ -98,7 +106,7 @@ export function DemoRequestDetailPage() {
   );
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-10 overflow-x-hidden">
       <PageHeader
         title={detail.original.organizationName}
         description={`Evaluation request ${detail.publicReference}. This workflow provisions a research/evaluation workspace, not a commercial sale.`}
@@ -106,15 +114,17 @@ export function DemoRequestDetailPage() {
         <span data-testid="demo-status">{DEMO_STATUS_LABELS[detail.status]}</span>
       </PageHeader>
 
-      <section aria-labelledby="original-heading" className="space-y-3">
+      <section aria-labelledby="original-heading" className="space-y-3 rounded-xl border p-5">
         <h2 id="original-heading" className="text-lg font-semibold">
-          Original request
+          Original submission
         </h2>
-        <p className="text-muted-foreground text-sm">Submitted payload is read-only.</p>
+        <p className="text-muted-foreground text-sm">Immutable. This is exactly what the applicant submitted.</p>
         <dl className="grid gap-3 sm:grid-cols-2">
-          <Field label="Applicant" value={`${detail.original.applicantName} · ${detail.original.applicantEmail}`} />
+          <Field label="Applicant" value={detail.original.applicantName} />
+          <Field label="Work email" value={detail.original.applicantEmail} />
+          <Field label="Role or title" value={detail.original.roleTitle || "—"} />
+          <Field label="Organization" value={detail.original.organizationName} />
           <Field label="Organization domain" value={detail.original.organizationDomain} />
-          <Field label="Role / title" value={detail.original.roleTitle || "—"} />
           <Field
             label="Deployment preference"
             value={DEPLOYMENT_LABELS[detail.original.deploymentPreference]}
@@ -125,18 +135,32 @@ export function DemoRequestDetailPage() {
             <Field label="Use case" value={detail.original.useCase} />
           </div>
           <div className="sm:col-span-2">
+            <Field
+              label="Agent capabilities of interest"
+              value={
+                detail.original.requestedAgentIds
+                  .map((id) => CAPABILITY_LABELS[id] ?? id)
+                  .join(", ") || "—"
+              }
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Technical requirements" value={detail.original.technicalRequirements || "—"} />
+          </div>
+          <div className="sm:col-span-2">
             <Field label="Infrastructure notes" value={detail.original.infrastructureNotes || "—"} />
           </div>
           <div className="sm:col-span-2">
-            <Field label="Additional details" value={detail.original.additionalDetails || "—"} />
+            <Field label="Additional context" value={detail.original.additionalDetails || "—"} />
           </div>
         </dl>
       </section>
 
-      <section aria-labelledby="proposed-heading" className="space-y-4">
+      <section aria-labelledby="proposed-heading" className="space-y-4 rounded-xl border p-5">
         <h2 id="proposed-heading" className="text-lg font-semibold">
-          Proposed demo configuration
+          Proposed evaluation configuration
         </h2>
+        <p className="text-muted-foreground text-sm">Editable by an operator before approval. Saving this does not change the original submission.</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <TextField
             id="customerName"
@@ -151,6 +175,13 @@ export function DemoRequestDetailPage() {
             value={proposed.customerDomain}
             disabled={!canEdit}
             onChange={(value) => setProposed({ ...proposed, customerDomain: value })}
+          />
+          <TextField
+            id="administratorEmail"
+            label="Approved customer administrator email"
+            value={proposed.administratorEmail}
+            disabled={!canEdit}
+            onChange={(value) => setProposed({ ...proposed, administratorEmail: value })}
           />
           <TextField
             id="demoStartAt"
@@ -187,6 +218,20 @@ export function DemoRequestDetailPage() {
             </select>
           </label>
           <TextField
+            id="maxAgentCount"
+            label="Approved maximum agent count"
+            value={proposed.maxAgentCount}
+            disabled={!canEdit}
+            onChange={(value) => setProposed({ ...proposed, maxAgentCount: value })}
+          />
+          <TextField
+            id="tokenAllowance"
+            label="Token/evaluation allowance"
+            value={proposed.tokenAllowance}
+            disabled={!canEdit}
+            onChange={(value) => setProposed({ ...proposed, tokenAllowance: value })}
+          />
+          <TextField
             id="enabledFeatures"
             label="Enabled features (comma-separated)"
             value={proposed.enabledFeatures.join(", ")}
@@ -200,7 +245,7 @@ export function DemoRequestDetailPage() {
           />
           <TextField
             id="permittedAgentIds"
-            label="Permitted agents (comma-separated ids)"
+            label="Approved agent products / capabilities"
             value={proposed.permittedAgentIds.join(", ")}
             disabled={!canEdit}
             onChange={(value) =>
@@ -210,6 +255,24 @@ export function DemoRequestDetailPage() {
               })
             }
           />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              disabled={!canEdit}
+              checked={proposed.portalAccessEnabled}
+              onChange={(event) => setProposed({ ...proposed, portalAccessEnabled: event.target.checked })}
+            />
+            Customer Portal access enabled
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              disabled={!canEdit}
+              checked={proposed.workspaceAccessEnabled}
+              onChange={(event) => setProposed({ ...proposed, workspaceAccessEnabled: event.target.checked })}
+            />
+            Agent workspace access enabled
+          </label>
           <div className="sm:col-span-2">
             <Label htmlFor="capacityNotes">Limits / capacity</Label>
             <Textarea
@@ -253,7 +316,14 @@ export function DemoRequestDetailPage() {
         </h2>
         <p>Job status: {detail.provisioning.status}</p>
         <p>Customer id: {detail.provisioning.customerId || "Not provisioned"}</p>
-        <p>Approved by: {detail.provisioning.approvedBy || "—"}</p>
+        <p>Welcome email: {detail.provisioning.welcomeEmailStatus}</p>
+        {detail.provisioning.customerId ? (
+          <p>
+            <a className="underline-offset-4 hover:underline" href={`/customers/${detail.provisioning.customerId}`}>
+              Open customer profile
+            </a>
+          </p>
+        ) : null}
       </section>
 
       <section aria-labelledby="actions-heading" className="flex flex-wrap gap-2">
@@ -302,13 +372,56 @@ export function DemoRequestDetailPage() {
         {detail.status === "under_review" ? (
           <DemoActionDialog
             action="approve"
-            title="Approve and provision demo?"
-            description="Creates or reuses the evaluation customer, grants selected access, and provisions Customer Portal membership. A welcome email is sent only after mandatory steps succeed."
-            confirmLabel="Approve and provision demo"
+            title="Approve and provision?"
+            description="This creates the evaluation customer, customer profile, commercial arrangement, entitlements, access grants, and portal membership. The welcome email is sent only after those mandatory steps succeed."
+            confirmLabel="Approve and provision"
             testId="approve-dialog"
+            summary={
+              <dl className="grid gap-2 text-sm" data-testid="approve-summary">
+                <div>
+                  <dt className="text-muted-foreground text-xs uppercase">Customer</dt>
+                  <dd>
+                    {proposed.customerName} ({proposed.customerDomain})
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs uppercase">Administrator</dt>
+                  <dd>{proposed.administratorEmail}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs uppercase">Evaluation window</dt>
+                  <dd>
+                    {proposed.demoStartAt} → {proposed.demoExpiresAt}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs uppercase">Deployment / capacity</dt>
+                  <dd>
+                    {DEPLOYMENT_LABELS[proposed.deploymentModel]} · {proposed.maxAgentCount}
+                  </dd>
+                </div>
+              </dl>
+            }
             onConfirm={(note) => act("approve", note)}
-            trigger={<Button data-testid="approve-demo">Approve and provision demo</Button>}
+            trigger={<Button data-testid="approve-demo">Approve and provision</Button>}
           />
+        ) : null}
+        {detail.status === "active" && detail.provisioning.welcomeEmailStatus === "failed" ? (
+          <Button
+            data-testid="retry-welcome-email"
+            onClick={async () => {
+              try {
+                const next = await retryWelcomeEmail(detail.id, detail.version);
+                setDetail(next);
+                setProposed(next.proposed);
+                toast.success("Welcome email retry queued");
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Could not retry the welcome email.");
+              }
+            }}
+          >
+            Retry welcome email
+          </Button>
         ) : null}
         {detail.status === "provisioning_failed" ? (
           <DemoActionDialog

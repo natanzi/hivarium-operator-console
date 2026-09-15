@@ -10,7 +10,7 @@ import {
   type DemoRequestStatus,
 } from "../../../src/domain/demo-request";
 import { newId, sha256Hex, timingSafeEqual } from "./crypto";
-import { needsInformationEmail, rejectionEmail } from "./email";
+import { needsInformationEmail, rejectionEmail, customerWelcomeEmail } from "./email";
 import { intakeDemoRequest } from "./intake";
 import { drainEmailOutbox } from "./outbox";
 import { provisionDemoRequest } from "./provision";
@@ -18,10 +18,12 @@ import {
   enqueueEmail,
   getDemoRequest,
   listDemoEvents,
-  listDemoRequests,
-  proposedFromRecord,
-  updateDemoRequestVersioned,
-  type DemoRequestRecord,
+    listDemoRequests,
+    proposedFromRecord,
+    updateDemoRequestVersioned,
+    type DemoRequestRecord,
+    countDemoInbox,
+    getEmailOutboxRow,
 } from "./store";
 
 function json(data: unknown, status = 200): Response {
@@ -75,6 +77,7 @@ function operatorEnvelope(record: DemoRequestRecord, events: unknown[] = []) {
         deploymentPreference: record.deploymentPreference,
         expectedAgentCount: record.expectedAgentCount,
         requestedAgentIds: record.requestedAgentIds,
+        technicalRequirements: record.technicalRequirements,
         infrastructureNotes: record.infrastructureNotes,
         timeline: record.timeline,
         additionalDetails: record.additionalDetails,
@@ -87,6 +90,7 @@ function operatorEnvelope(record: DemoRequestRecord, events: unknown[] = []) {
         approvedAt: record.approvedAt,
         rejectedBy: record.rejectedBy,
         rejectedAt: record.rejectedAt,
+        welcomeEmailStatus: record.welcomeEmailStatus,
       },
       events,
     },
@@ -129,6 +133,7 @@ export async function handleOperatorDemoApi(
     }
     const items = await listDemoRequests(env.DB, { status, q });
     return json({
+      inboxCount: await countDemoInbox(env.DB),
       items: items.map((item) => ({
         id: item.id,
         publicReference: item.publicReference,
@@ -136,6 +141,8 @@ export async function handleOperatorDemoApi(
         organizationName: item.organizationName,
         applicantName: item.applicantName,
         applicantEmail: item.applicantEmail,
+        useCase: item.useCase,
+        expectedAgentCount: item.expectedAgentCount,
         submittedAt: item.submittedAt,
         deploymentPreference: item.deploymentPreference,
         provisioningStatus: item.provisioningStatus,
@@ -157,6 +164,10 @@ export async function handleOperatorDemoApi(
 
   if (segments.length === 4 && segments[3] === "configuration" && method === "PATCH") {
     return patchConfiguration(request, env, identity, current);
+  }
+
+  if (segments.length === 4 && segments[3] === "welcome-email" && method === "POST") {
+    return retryWelcomeEmail(request, env, identity, current);
   }
 
   if (segments.length === 4 && segments[3] === "transition" && method === "POST") {
@@ -185,12 +196,17 @@ async function patchConfiguration(
     ...current,
     proposedCustomerName: proposed.customerName,
     proposedCustomerDomain: proposed.customerDomain,
+    proposedAdministratorEmail: proposed.administratorEmail,
     demoStartAt: proposed.demoStartAt,
     demoExpiresAt: proposed.demoExpiresAt,
     proposedDeploymentModel: proposed.deploymentModel,
     proposedFeatures: proposed.enabledFeatures,
     proposedAgentIds: proposed.permittedAgentIds,
     proposedCapacityNotes: proposed.capacityNotes,
+    proposedMaxAgentCount: proposed.maxAgentCount,
+    proposedTokenAllowance: proposed.tokenAllowance,
+    proposedPortalAccess: proposed.portalAccessEnabled,
+    proposedWorkspaceAccess: proposed.workspaceAccessEnabled,
     customerVisibleNotes: proposed.customerVisibleNotes,
     operatorNotes: proposed.operatorNotes,
     updatedAt: now,
@@ -236,19 +252,97 @@ function parseProposed(body: Record<string, unknown>, current: DemoRequestRecord
     }
     return value.map((item) => String(item).trim()).filter(Boolean).slice(0, 20);
   };
+  const optionalString = (key: string, fallback: string, max: number): string => {
+    const value = body[key];
+    if (value === undefined) return fallback;
+    if (typeof value !== "string" || value.trim().length > max) {
+      throw new ApiError(400, "validation-error", `${key} is invalid.`);
+    }
+    return value.trim();
+  };
+  const boolField = (key: string, fallback: boolean): boolean => {
+    const value = body[key];
+    if (value === undefined) return fallback;
+    if (typeof value !== "boolean") throw new ApiError(400, "validation-error", `${key} is invalid.`);
+    return value;
+  };
   return {
     customerName: stringField("customerName", 160),
     customerDomain: stringField("customerDomain", 253).toLowerCase(),
+    administratorEmail: normalizeAdminEmail(optionalString("administratorEmail", base.administratorEmail, 254) || base.administratorEmail),
     demoStartAt: stringField("demoStartAt", 40),
     demoExpiresAt: stringField("demoExpiresAt", 40),
     deploymentModel,
+    maxAgentCount: optionalString("maxAgentCount", base.maxAgentCount, 32),
     enabledFeatures: parseList("enabledFeatures", base.enabledFeatures),
     permittedAgentIds: parseList("permittedAgentIds", base.permittedAgentIds),
+    tokenAllowance: optionalString("tokenAllowance", base.tokenAllowance, 120),
+    portalAccessEnabled: boolField("portalAccessEnabled", base.portalAccessEnabled),
+    workspaceAccessEnabled: boolField("workspaceAccessEnabled", base.workspaceAccessEnabled),
     capacityNotes: typeof body.capacityNotes === "string" ? body.capacityNotes.trim().slice(0, 4000) : base.capacityNotes,
     customerVisibleNotes:
       typeof body.customerVisibleNotes === "string" ? body.customerVisibleNotes.trim().slice(0, 4000) : base.customerVisibleNotes,
     operatorNotes: typeof body.operatorNotes === "string" ? body.operatorNotes.trim().slice(0, 4000) : base.operatorNotes,
   };
+}
+
+function normalizeAdminEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new ApiError(400, "validation-error", "administratorEmail is invalid.");
+  }
+  return email;
+}
+
+async function retryWelcomeEmail(
+  _request: Request,
+  env: Env,
+  identity: OperatorIdentity,
+  current: DemoRequestRecord,
+): Promise<Response> {
+  if (current.status !== "active" || !current.provisionedCustomerId) {
+    throw new ApiError(409, "conflict", "Welcome email can be retried only after successful provisioning.");
+  }
+  const now = new Date().toISOString();
+  await enqueueEmail(env.DB, {
+    id: newId("eml"),
+    requestId: current.id,
+    template: "customer_welcome",
+    toEmail: current.proposedAdministratorEmail || current.applicantEmail,
+    idempotencyKey: `welcome-${current.id}`,
+    createdAt: now,
+  });
+  await drainEmailOutbox(env, {
+    customer_welcome: customerWelcomeEmail({
+      to: current.proposedAdministratorEmail || current.applicantEmail,
+      name: current.applicantName,
+      organization: current.organizationName,
+      reference: current.publicReference,
+      proposed: proposedFromRecord(current),
+      portalUrl: env.CUSTOMER_PORTAL_URL,
+      workspaceUrl: env.AGENT_WORKSPACE_URL,
+    }),
+  });
+  const outbox = await getEmailOutboxRow(env.DB, current.id, "customer_welcome");
+  const next: DemoRequestRecord = {
+    ...current,
+    welcomeEmailStatus: outbox?.status === "sent" ? "sent" : "failed",
+    updatedAt: now,
+    version: current.version + 1,
+  };
+  await updateDemoRequestVersioned(env.DB, current, next, {
+    id: newId("devent"),
+    requestId: current.id,
+    occurredAt: now,
+    principal: identity.email,
+    action: "demo.welcome_email_retried",
+    correlationId: newId("corr"),
+    idempotencyHash: "",
+    metadata: { status: next.welcomeEmailStatus },
+  });
+  const events = await listDemoEvents(env.DB, current.id);
+  const updated = (await getDemoRequest(env.DB, current.id))!;
+  return json(operatorEnvelope(updated, events));
 }
 
 async function transitionDemo(

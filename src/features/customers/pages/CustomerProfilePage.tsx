@@ -277,6 +277,13 @@ export function CustomerProfilePage() {
         id="customer-profile-title"
         description={`${customer.domain} · Customer since ${formatDate(customer.createdAt)}`}
       >
+        {customer.originDemoRequestId ? (
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/demo-requests/${customer.originDemoRequestId}`} data-testid="origin-demo-request">
+              Originating demo request
+            </a>
+          </Button>
+        ) : null}
         {!isArchived ? (
           <Button variant="outline" size="sm" asChild>
             <a href={`/customers/${customer.id}/edit`} data-testid="edit-customer-button">

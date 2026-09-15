@@ -23,6 +23,7 @@ export function DemoActionDialog({
   onConfirm,
   trigger,
   testId,
+  summary,
 }: {
   action: string;
   title: string;
@@ -32,6 +33,7 @@ export function DemoActionDialog({
   onConfirm: (note: string) => Promise<void>;
   trigger: ReactNode;
   testId: string;
+  summary?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -61,6 +63,7 @@ export function DemoActionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
+        {summary}
         </AlertDialogHeader>
         {requireNote ? (
           <div className="grid gap-2">

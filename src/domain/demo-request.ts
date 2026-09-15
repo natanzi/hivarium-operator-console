@@ -25,6 +25,7 @@ export const DEPLOYMENT_PREFERENCES = [
   "private_cloud",
   "on_premises",
   "bare_metal",
+  "hybrid",
   "not_sure",
 ] as const;
 
@@ -72,14 +73,44 @@ export class DemoTransitionError extends Error {
   }
 }
 
+export const EXPECTED_AGENT_COUNTS = [
+  "1-5",
+  "6-25",
+  "26-100",
+  "101-500",
+  "500+",
+  "not_sure",
+] as const;
+
+export type ExpectedAgentCount = (typeof EXPECTED_AGENT_COUNTS)[number];
+
+export const AGENT_CAPABILITIES = [
+  "operations_incident",
+  "security_monitoring",
+  "data_workflow",
+  "customer_support",
+  "telecom_network",
+  "agent_orchestration",
+  "ai_governance",
+  "custom_agent",
+  "not_sure",
+] as const;
+
+export type AgentCapability = (typeof AGENT_CAPABILITIES)[number];
+
 export interface DemoProposedConfig {
   customerName: string;
   customerDomain: string;
+  administratorEmail: string;
   demoStartAt: string;
   demoExpiresAt: string;
   deploymentModel: DeploymentPreference;
+  maxAgentCount: string;
   enabledFeatures: string[];
   permittedAgentIds: string[];
+  tokenAllowance: string;
+  portalAccessEnabled: boolean;
+  workspaceAccessEnabled: boolean;
   capacityNotes: string;
   customerVisibleNotes: string;
   operatorNotes: string;
@@ -95,6 +126,7 @@ export interface DemoIntakePayload {
   deploymentPreference: DeploymentPreference;
   expectedAgentCount: string;
   requestedAgentIds: string[];
+  technicalRequirements: string;
   infrastructureNotes: string;
   timeline: string;
   additionalDetails: string;
@@ -106,11 +138,16 @@ export function defaultProposedConfig(intake: DemoIntakePayload, nowIso: string)
   return {
     customerName: intake.organizationName,
     customerDomain: intake.organizationDomain,
+    administratorEmail: intake.applicantEmail,
     demoStartAt: start,
     demoExpiresAt: expires,
     deploymentModel: intake.deploymentPreference,
+    maxAgentCount: intake.expectedAgentCount,
     enabledFeatures: ["evaluation_workspace"],
     permittedAgentIds: [...intake.requestedAgentIds],
+    tokenAllowance: "",
+    portalAccessEnabled: true,
+    workspaceAccessEnabled: false,
     capacityNotes: intake.expectedAgentCount ? `Expected agents: ${intake.expectedAgentCount}` : "",
     customerVisibleNotes: "",
     operatorNotes: "",
