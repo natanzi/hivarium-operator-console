@@ -47,6 +47,6 @@ There is no hard-delete of demo history. To withdraw access:
 2. Confirm Operator list shows the organization and reference.
 3. Approve after editing proposed dates/agents.
 4. Confirm welcome email in the provider (or memory adapter in tests).
-5. Sign in at the origin configured in `CUSTOMER_PORTAL_URL` with that email; overview shows only that evaluation customer.
+5. Sign in at the origin configured in `CUSTOMER_PORTAL_URL` with that email; overview shows only that demo customer.
 6. Sign in with an unrelated email; no tenant data.
 7. Replay approval; customer count remains 1.

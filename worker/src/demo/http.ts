@@ -425,7 +425,7 @@ async function transitionDemo(
         to: current.applicantEmail,
         reference: current.publicReference,
         name: current.applicantName,
-        note: note || "Please reply with the additional evaluation details requested by the operator.",
+        note: note || "Please reply with the additional demo details requested by the operator.",
       }),
     });
   }
@@ -443,7 +443,7 @@ async function transitionDemo(
         to: current.applicantEmail,
         reference: current.publicReference,
         name: current.applicantName,
-        note: note || "The evaluation request was not approved.",
+        note: note || "The demo request was not approved.",
       }),
     });
   }

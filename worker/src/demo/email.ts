@@ -108,11 +108,11 @@ export function customerAckEmail(input: { to: string; reference: string; name: s
     to: input.to,
     template: "customer_ack",
     requestReference: input.reference,
-    subject: `We received your Hivarium evaluation request (${input.reference})`,
+    subject: `We received your Hivarium demo request (${input.reference})`,
     text: escapeText(
       [
         `Hello ${input.name},`,
-        `We received your request for a Hivarium research/evaluation workspace.`,
+        `We received your request for a Hivarium demo workspace.`,
         `Reference: ${input.reference}`,
         `This is not automatic account creation and not a purchase. An operator will review the request.`,
         `If approved, you will receive a separate welcome message with portal access instructions.`,
@@ -142,21 +142,21 @@ export function customerWelcomeEmail(input: {
   const workspaceUrl = resolveOptionalHttpsUrl(input.workspaceUrl);
   const lines = [
     `Hello ${input.name},`,
-    `Your Hivarium evaluation workspace is ready.`,
+    `Your Hivarium demo workspace is ready.`,
     `Organization: ${input.organization}`,
     `Request reference: ${input.reference}`,
-    `Evaluation status: active`,
-    `Evaluation start: ${input.proposed.demoStartAt}`,
-    `Evaluation expiration: ${input.proposed.demoExpiresAt}`,
+    `Demo status: active`,
+    `Demo start: ${input.proposed.demoStartAt}`,
+    `Demo expiration: ${input.proposed.demoExpiresAt}`,
     `Approved deployment model: ${input.proposed.deploymentModel}`,
     `Approved agent capacity: ${input.proposed.maxAgentCount || "not specified"}`,
-    `Enabled agents/features: ${[...input.proposed.enabledFeatures, ...input.proposed.permittedAgentIds].join(", ") || "evaluation workspace"}`,
+    `Enabled agents/features: ${[...input.proposed.enabledFeatures, ...input.proposed.permittedAgentIds].join(", ") || "demo workspace"}`,
     `Customer Portal: ${portalUrl}`,
-    `Customer Portal purpose: View your organization, evaluation configuration, licenses, usage, access and service requests.`,
+    `Customer Portal purpose: View your organization, demo configuration, licenses, usage, access and service requests.`,
   ];
   if (workspaceUrl) {
     lines.push(`Agent Workspace: ${workspaceUrl}`);
-    lines.push(`Agent Workspace purpose: Launch, observe and interact with the agents enabled for your evaluation.`);
+    lines.push(`Agent Workspace purpose: Launch, observe and interact with the agents enabled for your demo.`);
   }
   lines.push(
     `Sign in using the same email address that received this message. Cloudflare Access will send a one-time verification code. No password is included in this email.`,
@@ -166,7 +166,7 @@ export function customerWelcomeEmail(input: {
     to: input.to,
     template: "customer_welcome",
     requestReference: input.reference,
-    subject: "Your Hivarium evaluation workspace is ready",
+    subject: "Your Hivarium demo workspace is ready",
     text: escapeText(lines.join("\n")),
   };
 }
@@ -180,7 +180,7 @@ export function needsInformationEmail(input: { to: string; reference: string; na
     text: escapeText(
       [
         `Hello ${input.name},`,
-        `An operator needs more information about evaluation request ${input.reference}.`,
+        `An operator needs more information about your demo request ${input.reference}.`,
         input.note,
         `This is not a billing notice.`,
       ].join("\n"),
@@ -193,11 +193,11 @@ export function rejectionEmail(input: { to: string; reference: string; name: str
     to: input.to,
     template: "rejected",
     requestReference: input.reference,
-    subject: `Update on evaluation request ${input.reference}`,
+    subject: `Update on your demo request ${input.reference}`,
     text: escapeText(
       [
         `Hello ${input.name},`,
-        `Evaluation request ${input.reference} was not approved.`,
+        `Your demo request ${input.reference} was not approved.`,
         input.note,
         `This is not a commercial decision about a paid product.`,
       ].join("\n"),

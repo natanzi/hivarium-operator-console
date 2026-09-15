@@ -37,7 +37,7 @@ describe("customerWelcomeEmail", () => {
       portalUrl: "https://portal.example.test/",
       workspaceUrl: undefined,
     });
-    expect(withoutWorkspace?.subject).toBe("Your Hivarium evaluation workspace is ready");
+    expect(withoutWorkspace?.subject).toBe("Your Hivarium demo workspace is ready");
     expect(withoutWorkspace?.text).toContain("https://portal.example.test");
     expect(withoutWorkspace?.text).toContain("one-time verification code");
     expect(withoutWorkspace?.text).not.toContain("Agent Workspace:");
@@ -82,7 +82,7 @@ describe("HttpEmailGateway", () => {
         from: "Hivarium Access <access@hivarium.test>",
         reply_to: "access@hivarium.test",
         to: ["ada@acme.example"],
-        subject: "Your Hivarium evaluation workspace is ready",
+        subject: "Your Hivarium demo workspace is ready",
         text: "Sign in at https://portal.example.test",
       });
       const auth = new Headers(init?.headers).get("Authorization");
@@ -99,7 +99,7 @@ describe("HttpEmailGateway", () => {
     });
     const sent = await gateway.send({
       to: "ada@acme.example",
-      subject: "Your Hivarium evaluation workspace is ready",
+      subject: "Your Hivarium demo workspace is ready",
       text: "Sign in at https://portal.example.test",
       template: "customer_welcome",
       requestReference: "HV-1",
