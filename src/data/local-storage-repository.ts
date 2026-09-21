@@ -290,6 +290,8 @@ export interface HiveRepository {
   renewLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
   suspendLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
   revokeLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
+  resumeLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
+  replaceLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument>;
   downloadLicense(customerId: string, licenseId: string): Promise<string>;
 
 
@@ -1515,6 +1517,8 @@ export class LocalStorageRepository implements HiveRepository {
   async renewLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
   async suspendLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
   async revokeLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
+  async resumeLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
+  async replaceLicense(_customerId: string, _licenseId: string, _req: any): Promise<LicenseDocument> { throw new Error("not implemented"); }
   async downloadLicense(_customerId: string, _licenseId: string): Promise<string> { throw new Error("not implemented"); }
 }
 
