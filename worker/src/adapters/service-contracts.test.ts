@@ -80,6 +80,7 @@ describe("LicenseAdapter contract", () => {
       idempotencyKey: "renew-key-1",
       validUntil: "2027-12-31T00:00:00.000Z",
       successorId: "lic_new",
+      billingModel: "subscription",
     });
     expect(renewed.id).toBe("lic_new");
     const payload = JSON.parse(bodies[0]) as { successorId: string; claim: { licenseId: string; revisionNumber: number } };
@@ -150,6 +151,7 @@ describe("LicenseAdapter contract", () => {
       successorId: "lic_new2",
       entitlementLimits: { maxSeats: 20 },
       deploymentType: "managed",
+      billingModel: "subscription",
     });
     expect(replaced.id).toBe("lic_new2");
     const payload = JSON.parse(bodies[0]) as { successorId: string; claim: any };
@@ -181,6 +183,7 @@ describe("LicenseAdapter contract", () => {
       productId: "hivarium-core",
       idempotencyKey: "issuecore1",
       validUntil: "2028-01-01T00:00:00.000Z",
+      billingModel: "subscription",
     })).rejects.toMatchObject({ status: 409, code: "idempotency_conflict" });
   });
 
@@ -272,6 +275,43 @@ describe("wrong-path regression", () => {
     const spy = vi.fn(async () => new Response(JSON.stringify({ data: [] })));
     const adapter = new LicenseAdapter({ fetch: spy } as Fetcher, "t");
     await adapter.listLicenses("c");
-    expect(String(spy.mock.calls[0][0])).toMatch(/\/internal\/v1\/licenses/);
+    expect(String((spy.mock.calls[0] as any)[0])).toMatch(/\/internal\/v1\/licenses/);
+  });
+});
+
+import { handleLicensesApi } from "../api-extensions";
+import * as appDb from "../db";
+
+describe("api-extensions route regression", () => {
+  it("allows suspend for a customer with NO active commercial arrangement", async () => {
+    const mockEnv: any = {
+      DB: {} as any,
+      LICENSE_SERVICE: fetcherFor(async () => new Response(JSON.stringify({ data: { row: { current_revision: 1 }, claim: {} } }))),
+      LICENSE_SERVICE_TOKEN: "token",
+    };
+
+    const listSpy = vi.spyOn(appDb, "listCommercialArrangements").mockResolvedValue([]);
+    vi.spyOn(appDb, "loadCustomerStore").mockResolvedValue({
+      schemaVersion: 4, customers: [], featureEntitlements: [], agentProducts: [],
+      commercialArrangements: [], agentAccessGrants: [], activityEvents: [],
+      ledgerTransactions: [], usageRecords: []
+    } as any);
+    vi.spyOn(appDb, "commitStoreDiff").mockResolvedValue(undefined);
+
+    const req = new Request("https://test/api/customers/cust_a/licenses/lic_a/suspend", {
+      method: "POST",
+      body: JSON.stringify({ idempotencyKey: "idx", reason: "test" })
+    });
+
+    // Should NOT throw ApiError "no active commercial arrangement"
+    const res = await handleLicensesApi(
+      req,
+      mockEnv,
+      ["api", "customers", "cust_a", "licenses", "lic_a", "suspend"],
+      { sub: "op", email: "op@test.com" } as any
+    );
+
+    expect(listSpy).not.toHaveBeenCalled(); // The lookup should not have been reached for 'suspend'
+    expect(res.status).toBe(200);
   });
 });
