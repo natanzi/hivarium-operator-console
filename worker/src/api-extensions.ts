@@ -160,6 +160,19 @@ export async function handleLicensesApi(request: Request, env: Env, segments: st
             if (!body.reason) throw new ApiError(400, "validation-error", "Missing reason");
             updated = await adapter.revokeLicense(licId, { idempotencyKey, reason: body.reason as string });
             action = "license.revoked";
+        } else if (op === "resume") {
+            if (!body.reason) throw new ApiError(400, "validation-error", "Missing reason");
+            updated = await adapter.resumeLicense(licId, { idempotencyKey, reason: body.reason as string });
+            action = "license.resumed";
+        } else if (op === "replace") {
+            updated = await adapter.replaceLicense(licId, {
+                idempotencyKey,
+                successorId: typeof body.successorId === "string" ? body.successorId : undefined,
+                entitlementLimits: typeof body.entitlementLimits === "object" && body.entitlementLimits ? body.entitlementLimits as Record<string, number> : undefined,
+                validUntil: typeof body.validUntil === "string" ? body.validUntil : undefined,
+                deploymentType: typeof body.deploymentType === "string" ? body.deploymentType : undefined
+            });
+            action = "license.replaced";
         } else {
             throw new ApiError(404, "not-found", "Unknown API route.");
         }

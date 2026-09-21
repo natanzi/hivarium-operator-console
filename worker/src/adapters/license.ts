@@ -307,4 +307,49 @@ export class LicenseAdapter {
         const { row, claim } = this.unwrapRecord(res.data);
         return this.mapRow(row, claim);
     }
+
+    async resumeLicense(licenseId: string, req: { idempotencyKey: string; reason: string }): Promise<LicenseDocument> {
+        const res = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}/resume`, {
+            method: "POST",
+            headers: { "Idempotency-Key": req.idempotencyKey },
+            body: JSON.stringify({ reason: req.reason }),
+        });
+        const { row, claim } = this.unwrapRecord(res.data);
+        return this.mapRow(row, claim);
+    }
+
+    async replaceLicense(licenseId: string, req: { idempotencyKey: string; successorId?: string; entitlementLimits?: Record<string, number>; validUntil?: string; deploymentType?: string }): Promise<LicenseDocument> {
+        const current = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}`);
+        if (!current.data) throw new ApiError(502, "bad_gateway", "Malformed license document");
+        const { row, claim } = this.unwrapRecord(current.data);
+        if (!claim) throw new ApiError(502, "bad_gateway", "Current license claim is missing");
+
+        const successorId = req.successorId ?? stableLicenseId("licr_", req.idempotencyKey);
+
+        const limits = { ...(claim.limits as Record<string, unknown> ?? {}) };
+        if (req.entitlementLimits) {
+            for (const [k, v] of Object.entries(req.entitlementLimits)) {
+                limits[k] = v;
+            }
+        }
+
+        const nextClaim = {
+            ...claim,
+            licenseId: successorId,
+            revisionNumber: Number(claim.revisionNumber ?? row.current_revision) + 1,
+            limits,
+            ...(req.deploymentType ? { deploymentModes: [req.deploymentType] } : {}),
+            validity: {
+                ...(typeof claim.validity === "object" && claim.validity ? claim.validity : {}),
+                ...(req.validUntil !== undefined ? { expiresAt: req.validUntil, offlineValidUntil: req.validUntil } : {})
+            },
+        };
+        const replaced = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}/replace`, {
+            method: "POST",
+            headers: { "Idempotency-Key": req.idempotencyKey },
+            body: JSON.stringify({ successorId, claim: nextClaim }),
+        });
+        const mapped = this.unwrapRecord(replaced.data);
+        return this.mapRow(mapped.row, mapped.claim ?? (nextClaim as Record<string, unknown>));
+    }
 }

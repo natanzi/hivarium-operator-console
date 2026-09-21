@@ -62,6 +62,42 @@ describe("LicensesTab", () => {
         expect(screen.queryByText("Revoke License")).not.toBeInTheDocument();
     });
 
+    it("opens resume dialog and confirms", async () => {
+        repo.listLicenses = vi.fn().mockResolvedValue([{ id: "lic-2", productId: "core", status: "suspended", revision: 1, validFrom: MOCK_DATE, validUntil: null }]);
+        repo.resumeLicense = vi.fn().mockResolvedValue({});
+
+        renderTab();
+
+        const resumeBtn = await screen.findByRole("button", { name: "Resume" });
+        await user.click(resumeBtn);
+
+        const dialogTitle = await screen.findByText("Resume License");
+        expect(dialogTitle).toBeInTheDocument();
+
+        const confirmBtn = screen.getByRole("button", { name: "Confirm resume" });
+        await user.click(confirmBtn);
+
+        expect(repo.resumeLicense).toHaveBeenCalledWith("cust-1", "lic-2", expect.any(Object));
+    });
+
+    it("opens replace dialog and confirms", async () => {
+        repo.listLicenses = vi.fn().mockResolvedValue([{ id: "lic-3", productId: "core", status: "active", revision: 1, validFrom: MOCK_DATE, validUntil: null }]);
+        repo.replaceLicense = vi.fn().mockResolvedValue({});
+
+        renderTab();
+
+        const replaceBtn = await screen.findByRole("button", { name: "Replace" });
+        await user.click(replaceBtn);
+
+        const dialogTitle = await screen.findByText("Replace License");
+        expect(dialogTitle).toBeInTheDocument();
+
+        const confirmBtn = screen.getByRole("button", { name: "Confirm replace" });
+        await user.click(confirmBtn);
+
+        expect(repo.replaceLicense).toHaveBeenCalledWith("cust-1", "lic-3", expect.any(Object));
+    });
+
     it("handles downstream API failure gracefully", async () => {
         repo.listLicenses = vi.fn().mockResolvedValue([]);
         repo.issueLicense = vi.fn().mockRejectedValue(new Error("License issuance failed on backend"));

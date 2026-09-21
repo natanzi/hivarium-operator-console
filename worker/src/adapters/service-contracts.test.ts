@@ -47,19 +47,21 @@ describe("LicenseAdapter contract", () => {
           return new Response(JSON.stringify({
             data: {
               record: { license_id: "lic_old", customer_id: "cust_a", product: "hivarium-core", status: "active", current_revision: 1 },
-              revision: { payloadJson: JSON.stringify({
-                schemaVersion: 1,
-                licenseId: "lic_old",
-                customerId: "cust_a",
-                product: "hivarium-core",
-                revisionNumber: 1,
-                features: {},
-                limits: { maxSeats: 10, maxOrganizations: null, maxApiTokens: null, maxMonthlyOperations: null, maxStorageMb: null },
-                deploymentModes: ["self-hosted"],
-                billingModel: "subscription",
-                validity: { notBefore: "2026-01-01T00:00:00.000Z", expiresAt: "2026-12-31T00:00:00.000Z" },
-                activationPolicy: { maxActivations: null, activationTtlSeconds: null, allowRotation: false, allowedDeploymentModes: ["self-hosted"] },
-              }) },
+              revision: {
+                payloadJson: JSON.stringify({
+                  schemaVersion: 1,
+                  licenseId: "lic_old",
+                  customerId: "cust_a",
+                  product: "hivarium-core",
+                  revisionNumber: 1,
+                  features: {},
+                  limits: { maxSeats: 10, maxOrganizations: null, maxApiTokens: null, maxMonthlyOperations: null, maxStorageMb: null },
+                  deploymentModes: ["self-hosted"],
+                  billingModel: "subscription",
+                  validity: { notBefore: "2026-01-01T00:00:00.000Z", expiresAt: "2026-12-31T00:00:00.000Z" },
+                  activationPolicy: { maxActivations: null, activationTtlSeconds: null, allowRotation: false, allowedDeploymentModes: ["self-hosted"] },
+                })
+              },
             },
           }));
         }
@@ -85,6 +87,79 @@ describe("LicenseAdapter contract", () => {
     expect(payload.claim.licenseId).toBe("lic_new");
     expect(payload.claim.revisionNumber).toBe(2);
   });
+
+  it("resumes with reason on /internal/v1/licenses/:id/resume", async () => {
+    let body = "";
+    const adapter = new LicenseAdapter(
+      fetcherFor(async (url, init) => {
+        expect(url).toContain("/internal/v1/licenses/lic_sus/resume");
+        expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("resume-key-1");
+        body = String(init?.body);
+        return new Response(JSON.stringify({
+          data: {
+            record: { license_id: "lic_sus", customer_id: "cust_a", product: "hivarium-core", status: "active", current_revision: 2 },
+          },
+        }));
+      }),
+      "operator-license-token"
+    );
+    const resumed = await adapter.resumeLicense("lic_sus", { idempotencyKey: "resume-key-1", reason: "All good" });
+    expect(resumed.id).toBe("lic_sus");
+    expect(JSON.parse(body)).toEqual({ reason: "All good" });
+  });
+
+  it("replaces with successorId and claim on /internal/v1/licenses/:id/replace", async () => {
+    const bodies: string[] = [];
+    const adapter = new LicenseAdapter(
+      fetcherFor(async (url, init) => {
+        if (url.endsWith("/lic_old") && (!init?.method || init.method === "GET")) {
+          return new Response(JSON.stringify({
+            data: {
+              record: { license_id: "lic_old", customer_id: "cust_a", product: "hivarium-core", status: "active", current_revision: 1 },
+              revision: {
+                payloadJson: JSON.stringify({
+                  schemaVersion: 1,
+                  licenseId: "lic_old",
+                  customerId: "cust_a",
+                  product: "hivarium-core",
+                  revisionNumber: 1,
+                  features: {},
+                  limits: { maxSeats: 10, maxOrganizations: null, maxApiTokens: null, maxMonthlyOperations: null, maxStorageMb: null },
+                  deploymentModes: ["self-hosted"],
+                  billingModel: "subscription",
+                  validity: { notBefore: "2026-01-01T00:00:00.000Z", expiresAt: "2026-12-31T00:00:00.000Z" },
+                  activationPolicy: { maxActivations: null, activationTtlSeconds: null, allowRotation: false, allowedDeploymentModes: ["self-hosted"] },
+                })
+              },
+            },
+          }));
+        }
+        bodies.push(String(init?.body));
+        expect(url).toContain("/internal/v1/licenses/lic_old/replace");
+        expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("replace-key-1");
+        return new Response(JSON.stringify({
+          data: {
+            record: { license_id: "lic_new2", customer_id: "cust_a", product: "hivarium-core", status: "active", current_revision: 2 },
+          },
+        }));
+      }),
+      "operator-license-token"
+    );
+    const replaced = await adapter.replaceLicense("lic_old", {
+      idempotencyKey: "replace-key-1",
+      successorId: "lic_new2",
+      entitlementLimits: { maxSeats: 20 },
+      deploymentType: "managed",
+    });
+    expect(replaced.id).toBe("lic_new2");
+    const payload = JSON.parse(bodies[0]) as { successorId: string; claim: any };
+    expect(payload.successorId).toBe("lic_new2");
+    expect(payload.claim.licenseId).toBe("lic_new2");
+    expect(payload.claim.revisionNumber).toBe(2);
+    expect(payload.claim.limits.maxSeats).toBe(20);
+    expect(payload.claim.deploymentModes).toEqual(["managed"]);
+  });
+
 
   it("returns 409 when an issued license is replayed with a conflicting validity window", async () => {
     const adapter = new LicenseAdapter(

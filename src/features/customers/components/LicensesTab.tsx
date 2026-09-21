@@ -51,6 +51,12 @@ export function LicensesTab({ customerId }: { customerId: string }) {
         } else if (action === "issue") {
             title = "Issue New License";
             desc = "Are you sure you want to issue a new license for this customer? Consequential values will be applied.";
+        } else if (action === "resume") {
+            title = "Resume License";
+            desc = `Are you sure you want to resume license ${id}? This will restore its usage.`;
+        } else if (action === "replace") {
+            title = "Replace License";
+            desc = `Are you sure you want to replace license ${id}? A new successor license will be issued.`;
         }
 
         setActionDialog({ id, action, title, desc });
@@ -67,6 +73,10 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                 await repo.suspendLicense(customerId, id, { idempotencyKey: key, reason: "Operator action" });
             } else if (action === "revoke" && id) {
                 await repo.revokeLicense(customerId, id, { idempotencyKey: key, reason: "Operator action" });
+            } else if (action === "resume" && id) {
+                await repo.resumeLicense(customerId, id, { idempotencyKey: key, reason: "Operator action" });
+            } else if (action === "replace" && id) {
+                await repo.replaceLicense(customerId, id, { idempotencyKey: key });
             } else if (action === "issue") {
                 await repo.issueLicense(customerId, {
                     productId: "prod_core",
@@ -128,7 +138,13 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                         {lic.status === "active" && (
                             <>
                                 <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "suspend")}>Suspend</Button>
+                                <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "replace")}>Replace</Button>
                                 <Button size="sm" variant="destructive" onClick={() => handleActionClick(lic.id, "revoke")}>Revoke</Button>
+                            </>
+                        )}
+                        {lic.status === "suspended" && (
+                            <>
+                                <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "resume")}>Resume</Button>
                             </>
                         )}
                         <Button size="sm" onClick={() => handleDownload(lic.id)}>Download Doc</Button>
