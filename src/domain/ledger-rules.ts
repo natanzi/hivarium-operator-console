@@ -12,6 +12,7 @@ import type {
   DataStore,
   LedgerTransaction,
   LedgerTransactionKind,
+  CommercialArrangement,
   ManualAdjustmentTransaction,
   ReversalTransaction,
   UsageDebitTransaction,
@@ -65,6 +66,26 @@ export function deriveTokenBalance(
   return transactions
     .filter((transaction) => transaction.customerId === customerId)
     .reduce((sum, transaction) => sum + transaction.amountTokens, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Commercial Mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps a commercial model to the appropriate billing model for a license.
+ * Prepaid is balance-driven, not date-driven, so it gets no artificial expiry —
+ * access control for prepaid customers happens via suspend/resume on balance,
+ * not via license expiry.
+ */
+export function mapCommercialModelToBillingModel(model: CommercialArrangement["model"]): "subscription" | "perpetual" {
+  switch (model) {
+    case "monthly":
+    case "annual":
+      return "subscription";
+    case "prepaid":
+      return "perpetual";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +535,7 @@ export function projectAccountStatement(
     .sort(
       (a, b) =>
         parseInstant(a.transaction.occurredAt) -
-          parseInstant(b.transaction.occurredAt) || a.index - b.index
+        parseInstant(b.transaction.occurredAt) || a.index - b.index
     );
 
   let runningBalance = 0;

@@ -170,6 +170,7 @@ export class LicenseAdapter {
         validUntil?: string | null;
         entitlementLimits?: Record<string, number>;
         deploymentType?: string;
+        billingModel: "subscription" | "perpetual";
     }) {
         const now = new Date().toISOString();
         const mode = (input.deploymentType ?? "self-hosted") as "self-hosted";
@@ -188,11 +189,13 @@ export class LicenseAdapter {
                 maxStorageMb: null,
             },
             deploymentModes: [mode],
-            billingModel: "subscription" as const,
+            billingModel: input.billingModel,
             validity: {
                 notBefore: input.validFrom ?? now,
-                expiresAt: input.validUntil ?? null,
-                offlineValidUntil: input.validUntil ?? new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString(),
+                expiresAt: input.billingModel === "perpetual" ? null : (input.validUntil ?? null),
+                offlineValidUntil: input.billingModel === "perpetual"
+                    ? new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString()
+                    : (input.validUntil ?? new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString()),
             },
             activationPolicy: {
                 maxActivations: null,
@@ -212,6 +215,7 @@ export class LicenseAdapter {
         deploymentType?: string;
         entitlementLimits?: Record<string, number>;
         licenseId?: string;
+        billingModel: "subscription" | "perpetual";
     }): Promise<LicenseDocument> {
         const licenseId = req.licenseId ?? stableLicenseId("lic_", req.idempotencyKey);
         try {
@@ -253,6 +257,7 @@ export class LicenseAdapter {
             validUntil: req.validUntil,
             entitlementLimits: req.entitlementLimits,
             deploymentType: req.deploymentType,
+            billingModel: req.billingModel,
         });
         const issued = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}/issue`, {
             method: "POST",
@@ -263,7 +268,7 @@ export class LicenseAdapter {
         return this.mapRow(row, stored ?? (claim as unknown as Record<string, unknown>));
     }
 
-    async renewLicense(licenseId: string, req: { idempotencyKey: string; validUntil: string; successorId?: string }): Promise<LicenseDocument> {
+    async renewLicense(licenseId: string, req: { idempotencyKey: string; validUntil: string; successorId?: string; billingModel: "subscription" | "perpetual" }): Promise<LicenseDocument> {
         const current = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}`);
         if (!current.data) throw new ApiError(502, "bad_gateway", "Malformed license document");
         const { row, claim } = this.unwrapRecord(current.data);
@@ -273,10 +278,13 @@ export class LicenseAdapter {
             ...claim,
             licenseId: successorId,
             revisionNumber: Number(claim.revisionNumber ?? row.current_revision) + 1,
+            billingModel: req.billingModel,
             validity: {
                 ...(typeof claim.validity === "object" && claim.validity ? claim.validity : {}),
-                expiresAt: req.validUntil,
-                offlineValidUntil: req.validUntil,
+                expiresAt: req.billingModel === "perpetual" ? null : req.validUntil,
+                offlineValidUntil: req.billingModel === "perpetual"
+                    ? new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString()
+                    : req.validUntil,
             },
         };
         const renewed = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}/renew`, {
@@ -318,7 +326,7 @@ export class LicenseAdapter {
         return this.mapRow(row, claim);
     }
 
-    async replaceLicense(licenseId: string, req: { idempotencyKey: string; successorId?: string; entitlementLimits?: Record<string, number>; validUntil?: string; deploymentType?: string }): Promise<LicenseDocument> {
+    async replaceLicense(licenseId: string, req: { idempotencyKey: string; successorId?: string; entitlementLimits?: Record<string, number>; validUntil?: string; deploymentType?: string; billingModel: "subscription" | "perpetual" }): Promise<LicenseDocument> {
         const current = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}`);
         if (!current.data) throw new ApiError(502, "bad_gateway", "Malformed license document");
         const { row, claim } = this.unwrapRecord(current.data);
@@ -338,10 +346,19 @@ export class LicenseAdapter {
             licenseId: successorId,
             revisionNumber: Number(claim.revisionNumber ?? row.current_revision) + 1,
             limits,
+            billingModel: req.billingModel,
             ...(req.deploymentType ? { deploymentModes: [req.deploymentType] } : {}),
             validity: {
                 ...(typeof claim.validity === "object" && claim.validity ? claim.validity : {}),
-                ...(req.validUntil !== undefined ? { expiresAt: req.validUntil, offlineValidUntil: req.validUntil } : {})
+                ...(req.validUntil !== undefined ? {
+                    expiresAt: req.billingModel === "perpetual" ? null : req.validUntil,
+                    offlineValidUntil: req.billingModel === "perpetual"
+                        ? new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString()
+                        : req.validUntil
+                } : {
+                    expiresAt: req.billingModel === "perpetual" ? null : undefined,
+                    offlineValidUntil: req.billingModel === "perpetual" ? new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString() : undefined,
+                })
             },
         };
         const replaced = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}/replace`, {

@@ -68,6 +68,7 @@ import {
   applyManualAdjustment,
   assertNoNegativeBalance,
   creditGrantTransactionId,
+  deriveTokenBalance,
   filterStatement,
   groupUsageByAgent,
   normalizeUsageFingerprint,
@@ -80,7 +81,7 @@ import {
   type UsageAggregationFilter,
   type UsagePeriod,
 } from "../../src/domain/ledger-rules";
-import { handleLicensesApi, handleRequestsApi } from "./api-extensions";
+import { handleLicensesApi, handleRequestsApi, licenseAdapter } from "./api-extensions";
 import { handleLandingDemoIntake, handleOperatorDemoApi } from "./demo/http";
 
 /**
@@ -808,6 +809,54 @@ async function handleGetLedger(
   return json({ customerId, rows });
 }
 
+export async function checkLedgerAutoSuspend(env: Env, customerId: string, identity: OperatorIdentity, afterStore: DataStore): Promise<void> {
+  const prepaid = afterStore.commercialArrangements.find(a => a.status === "active" && a.model === "prepaid");
+  if (!prepaid) return;
+
+  const currentBalance = deriveTokenBalance(afterStore.ledgerTransactions, customerId);
+  const adapter = licenseAdapter(env);
+  const licenses = await adapter.listLicenses(customerId);
+
+  if (currentBalance <= 0) {
+    for (const lic of licenses) {
+      if (lic.status === "active" || lic.status === "draft") {
+        await adapter.suspendLicense(lic.id, {
+          idempotencyKey: `aus-${lic.id}-${Date.now()}`,
+          reason: "prepaid_balance_zero"
+        });
+        await env.DB.prepare("INSERT OR REPLACE INTO license_auto_suspensions (license_id, reason, suspended_at) VALUES (?, ?, ?)").bind(lic.id, "prepaid_balance_zero", nowIso()).run();
+
+        const audit = buildAuditEntry({
+          identity, action: "license.auto_suspended", customerId, subjectType: "license", subjectId: lic.id,
+          summary: `Auto-suspended license ${lic.id} due to zero balance.`,
+          after: lic, occurredAt: nowIso()
+        });
+        await commitStoreDiff(env.DB, diffStores(afterStore, afterStore), audit);
+      }
+    }
+  } else {
+    for (const lic of licenses) {
+      if (lic.status === "suspended") {
+        const marker = await env.DB.prepare("SELECT * FROM license_auto_suspensions WHERE license_id = ?").bind(lic.id).first();
+        if (marker && marker.reason === "prepaid_balance_zero") {
+          await adapter.resumeLicense(lic.id, {
+            idempotencyKey: `aur-${lic.id}-${Date.now()}`,
+            reason: "prepaid_balance_restored"
+          });
+          await env.DB.prepare("DELETE FROM license_auto_suspensions WHERE license_id = ?").bind(lic.id).run();
+
+          const audit = buildAuditEntry({
+            identity, action: "license.auto_resumed", customerId, subjectType: "license", subjectId: lic.id,
+            summary: `Auto-resumed license ${lic.id} due to positive balance.`,
+            after: lic, occurredAt: nowIso()
+          });
+          await commitStoreDiff(env.DB, diffStores(afterStore, afterStore), audit);
+        }
+      }
+    }
+  }
+}
+
 async function handleAddCredit(
   request: Request,
   env: Env,
@@ -847,11 +896,11 @@ async function handleAddCredit(
     )
   );
 
-  const after: DataStore = {
+  const afterStore: DataStore = {
     ...before,
     ledgerTransactions: [...before.ledgerTransactions, transaction],
   };
-  const diff = diffStores(before, after);
+  const diff = diffStores(before, afterStore);
   const audit = buildAuditEntry({
     identity,
     action: "ledger.credit_grant",
@@ -863,6 +912,7 @@ async function handleAddCredit(
     occurredAt,
   });
   await commitStoreDiff(env.DB, diff, audit);
+  await checkLedgerAutoSuspend(env, customerId, identity, afterStore);
   return json({ transaction }, 201);
 }
 
@@ -954,6 +1004,7 @@ async function handleRecordUsage(
     occurredAt,
   });
   await commitStoreDiff(env.DB, diff, audit);
+  await checkLedgerAutoSuspend(env, trimmedCustomerId, identity, result.store);
   return json(
     { usage: result.usage, transaction: result.transaction, replay: false },
     201
@@ -997,6 +1048,7 @@ async function handleAddAdjustment(
     occurredAt,
   });
   await commitStoreDiff(env.DB, diff, audit);
+  await checkLedgerAutoSuspend(env, customerId, identity, result.store);
   return json({ transaction: result.transaction }, 201);
 }
 
@@ -1039,6 +1091,7 @@ async function handleAddReversal(
     occurredAt,
   });
   await commitStoreDiff(env.DB, diff, audit);
+  await checkLedgerAutoSuspend(env, customerId, identity, result.store);
   return json({ transaction: result.transaction }, 201);
 }
 
@@ -1567,17 +1620,17 @@ async function handleService(request: Request, env: Env, url: URL): Promise<Resp
       },
       commercial: active
         ? {
-            model: active.model,
-            effectiveDate: active.effectiveFrom,
-            endDate: active.effectiveTo,
-            renewalDate: active.model === "monthly" ? active.renewsAt : null,
-          }
+          model: active.model,
+          effectiveDate: active.effectiveFrom,
+          endDate: active.effectiveTo,
+          renewalDate: active.model === "monthly" ? active.renewsAt : null,
+        }
         : null,
       prepaid: activePrepaid
         ? {
-            balanceTokens: tokenBalance,
-            warningThresholdTokens,
-          }
+          balanceTokens: tokenBalance,
+          warningThresholdTokens,
+        }
         : null,
       features,
       access: {

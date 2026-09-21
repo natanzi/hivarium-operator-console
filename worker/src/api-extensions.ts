@@ -1,7 +1,8 @@
 import { ApiError } from "./app";
 import { PortalAdapter } from "./adapters/portal";
 import { LicenseAdapter } from "./adapters/license";
-import { buildAuditEntry, commitStoreDiff, loadCustomerStore, diffStores } from "./db";
+import { buildAuditEntry, commitStoreDiff, loadCustomerStore, diffStores, listCommercialArrangements } from "./db";
+import { mapCommercialModelToBillingModel } from "../../src/domain/ledger-rules";
 import { Env } from "./app";
 import { OperatorIdentity } from "./auth";
 
@@ -29,7 +30,7 @@ function portalAdapter(env: Env): PortalAdapter {
     return new PortalAdapter(env.CUSTOMER_PORTAL_SERVICE, env.PORTAL_SERVICE_TOKEN, env.CUSTOMER_PORTAL_SERVICE_URL);
 }
 
-function licenseAdapter(env: Env): LicenseAdapter {
+export function licenseAdapter(env: Env): LicenseAdapter {
     return new LicenseAdapter(env.LICENSE_SERVICE, env.LICENSE_SERVICE_TOKEN, env.LICENSE_SERVICE_URL);
 }
 
@@ -105,12 +106,18 @@ export async function handleLicensesApi(request: Request, env: Env, segments: st
         const idempotencyKey = body.idempotencyKey as string;
         if (!productId || !idempotencyKey) throw new ApiError(400, "validation-error", "Missing productId or idempotencyKey");
 
+        const arrangements = await listCommercialArrangements(env.DB, customerId);
+        const active = arrangements.find(a => a.status === "active");
+        if (!active) throw new ApiError(400, "validation-error", "no active commercial arrangement for customer");
+        const billingModel = mapCommercialModelToBillingModel(active.model);
+
         const issued = await adapter.issueLicense({
             customerId, productId, idempotencyKey,
             validFrom: body.validFrom as string,
             validUntil: body.validUntil as string,
             deploymentType: body.deploymentType as string,
-            entitlementLimits: body.entitlementLimits as Record<string, number>
+            entitlementLimits: body.entitlementLimits as Record<string, number>,
+            billingModel
         });
 
         const before = await loadCustomerStore(env.DB, customerId);
@@ -146,11 +153,16 @@ export async function handleLicensesApi(request: Request, env: Env, segments: st
         const idempotencyKey = body.idempotencyKey as string;
         if (!idempotencyKey) throw new ApiError(400, "validation-error", "Missing idempotencyKey");
 
+        const arrangements = await listCommercialArrangements(env.DB, customerId);
+        const active = arrangements.find(a => a.status === "active");
+        if (!active) throw new ApiError(400, "validation-error", "no active commercial arrangement for customer");
+        const billingModel = mapCommercialModelToBillingModel(active.model);
+
         let updated;
         let action = "";
         if (op === "renew") {
             if (!body.validUntil) throw new ApiError(400, "validation-error", "Missing validUntil");
-            updated = await adapter.renewLicense(licId, { idempotencyKey, validUntil: body.validUntil as string });
+            updated = await adapter.renewLicense(licId, { idempotencyKey, validUntil: body.validUntil as string, billingModel });
             action = "license.renewed";
         } else if (op === "suspend") {
             if (!body.reason) throw new ApiError(400, "validation-error", "Missing reason");
@@ -170,7 +182,8 @@ export async function handleLicensesApi(request: Request, env: Env, segments: st
                 successorId: typeof body.successorId === "string" ? body.successorId : undefined,
                 entitlementLimits: typeof body.entitlementLimits === "object" && body.entitlementLimits ? body.entitlementLimits as Record<string, number> : undefined,
                 validUntil: typeof body.validUntil === "string" ? body.validUntil : undefined,
-                deploymentType: typeof body.deploymentType === "string" ? body.deploymentType : undefined
+                deploymentType: typeof body.deploymentType === "string" ? body.deploymentType : undefined,
+                billingModel
             });
             action = "license.replaced";
         } else {

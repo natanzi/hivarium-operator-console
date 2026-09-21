@@ -5,6 +5,7 @@ import {
   assertNoNegativeBalance,
   creditGrantTransactionId,
   deriveTokenBalance,
+  mapCommercialModelToBillingModel,
   filterStatement,
   groupUsageByAgent,
   isLowBalance,
@@ -185,6 +186,24 @@ describe("deriveTokenBalance", () => {
       usageDebit({ amountTokens: -250 }),
     ];
     expect(deriveTokenBalance(transactions, "cust_1")).toBe(-150);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapCommercialModelToBillingModel
+// ---------------------------------------------------------------------------
+
+describe("mapCommercialModelToBillingModel", () => {
+  it("maps monthly to subscription", () => {
+    expect(mapCommercialModelToBillingModel("monthly")).toBe("subscription");
+  });
+
+  it("maps annual to subscription", () => {
+    expect(mapCommercialModelToBillingModel("annual")).toBe("subscription");
+  });
+
+  it("maps prepaid to perpetual", () => {
+    expect(mapCommercialModelToBillingModel("prepaid")).toBe("perpetual");
   });
 });
 
