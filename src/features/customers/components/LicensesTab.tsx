@@ -21,6 +21,7 @@ export function LicensesTab({ customerId }: { customerId: string }) {
     const [error, setError] = useState<string | null>(null);
 
     const [actionDialog, setActionDialog] = useState<{ id: string | null; action: string; title: string; desc: string }>({ id: null, action: "", title: "", desc: "" });
+    const [deployInputs, setDeployInputs] = useState({ instanceId: "", environment: "production", deploymentMode: "", label: "" });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
 
@@ -57,6 +58,16 @@ export function LicensesTab({ customerId }: { customerId: string }) {
         } else if (action === "replace") {
             title = "Replace License";
             desc = `Are you sure you want to replace license ${id}? A new successor license will be issued.`;
+        } else if (action === "mark-deployed") {
+            title = "Mark Deployed";
+            desc = `Record an instance deployment for license ${id}.`;
+            const lic = licenses?.find(l => l.id === id);
+            setDeployInputs({
+                instanceId: "",
+                environment: "production",
+                deploymentMode: lic?.deploymentType || "self-hosted",
+                label: ""
+            });
         }
 
         setActionDialog({ id, action, title, desc });
@@ -82,6 +93,11 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                     productId: "prod_core",
                     idempotencyKey: key,
                     entitlementLimits: { agents: 10 }
+                });
+            } else if (action === "mark-deployed" && id) {
+                await repo.markDeployed(customerId, id, {
+                    idempotencyKey: key,
+                    ...deployInputs
                 });
             }
 
@@ -140,6 +156,9 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                                 <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "suspend")}>Suspend</Button>
                                 <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "replace")}>Replace</Button>
                                 <Button size="sm" variant="destructive" onClick={() => handleActionClick(lic.id, "revoke")}>Revoke</Button>
+                                {["self-hosted", "air-gapped"].includes(lic.deploymentType) && (
+                                    <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "mark-deployed")}>Mark Deployed</Button>
+                                )}
                             </>
                         )}
                         {lic.status === "suspended" && (
@@ -162,6 +181,26 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                             {actionDialog.desc}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
+                    {actionDialog.action === "mark-deployed" && (
+                        <div className="flex flex-col gap-3 mt-4 text-sm">
+                            <div>
+                                <label className="block mb-1 font-medium">Instance ID</label>
+                                <input className="w-full border p-2 rounded" value={deployInputs.instanceId} onChange={e => setDeployInputs({ ...deployInputs, instanceId: e.target.value })} placeholder="e.g. i-12345" />
+                            </div>
+                            <div>
+                                <label className="block mb-1 font-medium">Environment</label>
+                                <input className="w-full border p-2 rounded" value={deployInputs.environment} onChange={e => setDeployInputs({ ...deployInputs, environment: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block mb-1 font-medium">Deployment Mode</label>
+                                <input className="w-full border p-2 rounded" value={deployInputs.deploymentMode} onChange={e => setDeployInputs({ ...deployInputs, deploymentMode: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block mb-1 font-medium">Label (optional)</label>
+                                <input className="w-full border p-2 rounded" value={deployInputs.label} onChange={e => setDeployInputs({ ...deployInputs, label: e.target.value })} />
+                            </div>
+                        </div>
+                    )}
                     {actionError && (
                         <div className="p-3 bg-red-100 text-red-900 text-sm rounded mt-2 border border-red-200">
                             {actionError}

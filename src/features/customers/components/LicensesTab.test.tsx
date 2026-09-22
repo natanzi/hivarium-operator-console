@@ -98,6 +98,32 @@ describe("LicensesTab", () => {
         expect(repo.replaceLicense).toHaveBeenCalledWith("cust-1", "lic-3", expect.any(Object));
     });
 
+    it("opens mark deployed dialog and submits data", async () => {
+        repo.listLicenses = vi.fn().mockResolvedValue([{ id: "lic-bm", productId: "core", status: "active", deploymentType: "self-hosted", revision: 1, validFrom: MOCK_DATE, validUntil: null }]);
+        repo.markDeployed = vi.fn().mockResolvedValue({});
+
+        renderTab();
+
+        const markBtn = await screen.findByRole("button", { name: "Mark Deployed" });
+        await user.click(markBtn);
+
+        expect(await screen.findByRole("heading", { name: "Mark Deployed" })).toBeInTheDocument();
+
+        const instanceInput = screen.getByPlaceholderText("e.g. i-12345");
+        await user.click(instanceInput);
+        await user.keyboard("i-test1");
+
+        const confirmBtn = screen.getByRole("button", { name: "Confirm mark-deployed" });
+        await user.click(confirmBtn);
+
+        expect(repo.markDeployed).toHaveBeenCalledWith("cust-1", "lic-bm", expect.objectContaining({
+            instanceId: "i-test1",
+            environment: "production",
+            deploymentMode: "self-hosted",
+            label: ""
+        }));
+    });
+
     it("handles downstream API failure gracefully", async () => {
         repo.listLicenses = vi.fn().mockResolvedValue([]);
         repo.issueLicense = vi.fn().mockRejectedValue(new Error("License issuance failed on backend"));

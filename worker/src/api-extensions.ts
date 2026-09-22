@@ -191,6 +191,18 @@ export async function handleLicensesApi(request: Request, env: Env, segments: st
                 billingModel
             });
             action = "license.replaced";
+        } else if (op === "mark-deployed") {
+            if (!body.instanceId || !body.environment || !body.deploymentMode) {
+                throw new ApiError(400, "validation-error", "Missing required fields for mark-deployed");
+            }
+            updated = await adapter.markDeployed(licId, {
+                idempotencyKey,
+                instanceId: String(body.instanceId),
+                environment: String(body.environment),
+                deploymentMode: String(body.deploymentMode),
+                label: typeof body.label === "string" ? body.label : undefined
+            });
+            action = "license.marked_deployed";
         } else {
             throw new ApiError(404, "not-found", "Unknown API route.");
         }

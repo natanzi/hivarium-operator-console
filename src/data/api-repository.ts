@@ -649,6 +649,14 @@ export class ApiRepository implements HiveRepository {
     return license;
   }
 
+  async markDeployed(customerId: string, licenseId: string, req: any): Promise<LicenseDocument> {
+    const { license } = await this.request<{ license: LicenseDocument }>(
+      `/api/customers/${encodeURIComponent(customerId)}/licenses/${encodeURIComponent(licenseId)}/mark-deployed`,
+      { method: "POST", body: JSON.stringify(req) }
+    );
+    return license;
+  }
+
   async replaceLicense(customerId: string, licenseId: string, req: any): Promise<LicenseDocument> {
     const { license } = await this.request<{ license: LicenseDocument }>(
       `/api/customers/${encodeURIComponent(customerId)}/licenses/${encodeURIComponent(licenseId)}/replace`,
