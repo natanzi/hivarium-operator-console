@@ -188,7 +188,8 @@ export async function handleLicensesApi(request: Request, env: Env, segments: st
                 entitlementLimits: typeof body.entitlementLimits === "object" && body.entitlementLimits ? body.entitlementLimits as Record<string, number> : undefined,
                 validUntil: typeof body.validUntil === "string" ? body.validUntil : undefined,
                 deploymentType: typeof body.deploymentType === "string" ? body.deploymentType : undefined,
-                billingModel
+                billingModel,
+                deploymentId: typeof body.deploymentId === "string" ? body.deploymentId : undefined
             });
             action = "license.replaced";
         } else if (op === "mark-deployed") {

@@ -326,7 +326,7 @@ export class LicenseAdapter {
         return this.mapRow(row, claim);
     }
 
-    async replaceLicense(licenseId: string, req: { idempotencyKey: string; successorId?: string; entitlementLimits?: Record<string, number>; validUntil?: string; deploymentType?: string; billingModel: "subscription" | "perpetual" }): Promise<LicenseDocument> {
+    async replaceLicense(licenseId: string, req: { idempotencyKey: string; successorId?: string; entitlementLimits?: Record<string, number>; validUntil?: string; deploymentType?: string; billingModel: "subscription" | "perpetual"; deploymentId?: string }): Promise<LicenseDocument> {
         const current = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}`);
         if (!current.data) throw new ApiError(502, "bad_gateway", "Malformed license document");
         const { row, claim } = this.unwrapRecord(current.data);
@@ -348,6 +348,7 @@ export class LicenseAdapter {
             limits,
             billingModel: req.billingModel,
             ...(req.deploymentType ? { deploymentModes: [req.deploymentType] } : {}),
+            ...(req.deploymentId ? { deploymentBinding: { ...(typeof claim.deploymentBinding === "object" && claim.deploymentBinding ? claim.deploymentBinding : {}), deploymentId: req.deploymentId } } : {}),
             validity: {
                 ...(typeof claim.validity === "object" && claim.validity ? claim.validity : {}),
                 ...(req.validUntil !== undefined ? {

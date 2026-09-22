@@ -22,6 +22,7 @@ export function LicensesTab({ customerId }: { customerId: string }) {
 
     const [actionDialog, setActionDialog] = useState<{ id: string | null; action: string; title: string; desc: string }>({ id: null, action: "", title: "", desc: "" });
     const [deployInputs, setDeployInputs] = useState({ instanceId: "", environment: "production", deploymentMode: "", label: "" });
+    const [deploymentsThisSession, setDeploymentsThisSession] = useState<Set<string>>(new Set());
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
 
@@ -68,6 +69,10 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                 deploymentMode: lic?.deploymentType || "self-hosted",
                 label: ""
             });
+        } else if (action === "bind-fingerprint") {
+            title = "Bind to Fingerprint";
+            desc = `Bind license ${id} to a specific deployment fingerprint.`;
+            setDeployInputs(prev => ({ ...prev, instanceId: "" }));
         }
 
         setActionDialog({ id, action, title, desc });
@@ -98,6 +103,12 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                 await repo.markDeployed(customerId, id, {
                     idempotencyKey: key,
                     ...deployInputs
+                });
+                setDeploymentsThisSession(prev => new Set(prev).add(id));
+            } else if (action === "bind-fingerprint" && id) {
+                await repo.replaceLicense(customerId, id, {
+                    idempotencyKey: key,
+                    deploymentId: deployInputs.instanceId // Fingerprint
                 });
             }
 
@@ -157,7 +168,14 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                                 <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "replace")}>Replace</Button>
                                 <Button size="sm" variant="destructive" onClick={() => handleActionClick(lic.id, "revoke")}>Revoke</Button>
                                 {["self-hosted", "air-gapped"].includes(lic.deploymentType) && (
-                                    <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "mark-deployed")}>Mark Deployed</Button>
+                                    <>
+                                        {!deploymentsThisSession.has(lic.id) && (
+                                            <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "mark-deployed")}>Mark Deployed</Button>
+                                        )}
+                                        {deploymentsThisSession.has(lic.id) && (
+                                            <Button size="sm" variant="outline" onClick={() => handleActionClick(lic.id, "bind-fingerprint")}>Bind to Fingerprint</Button>
+                                        )}
+                                    </>
                                 )}
                             </>
                         )}
@@ -201,6 +219,14 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                             </div>
                         </div>
                     )}
+                    {actionDialog.action === "bind-fingerprint" && (
+                        <div className="flex flex-col gap-3 mt-4 text-sm">
+                            <div>
+                                <label className="block mb-1 font-medium">Fingerprint (Deployment ID)</label>
+                                <input className="w-full border p-2 rounded" value={deployInputs.instanceId} onChange={e => setDeployInputs({ ...deployInputs, instanceId: e.target.value })} placeholder="e.g. fgpt-999" />
+                            </div>
+                        </div>
+                    )}
                     {actionError && (
                         <div className="p-3 bg-red-100 text-red-900 text-sm rounded mt-2 border border-red-200">
                             {actionError}
@@ -224,6 +250,6 @@ export function LicensesTab({ customerId }: { customerId: string }) {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-        </div>
+        </div >
     );
 }
