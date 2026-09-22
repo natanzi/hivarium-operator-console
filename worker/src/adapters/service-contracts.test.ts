@@ -199,6 +199,40 @@ describe("LicenseAdapter contract", () => {
     const adapter = new LicenseAdapter(fetcherFor(async () => new Response("{}")), "");
     await expect(adapter.listLicenses("cust_a")).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("markDeployed correctly maps follow-up license instead of activation", async () => {
+    let callCount = 0;
+    const adapter = new LicenseAdapter(
+      fetcherFor(async (url) => {
+        callCount++;
+        const path = new URL(url).pathname;
+        if (path.endsWith("/activations")) {
+          return new Response(JSON.stringify({
+            data: { id: "act_1", license_id: "lic_deploy", instance_id: "i-123", deployment_mode: "self-hosted", status: "active" }
+          }));
+        } else if (path.endsWith("/lic_deploy")) {
+          return new Response(JSON.stringify({
+            data: {
+              record: { license_id: "lic_deploy", customer_id: "cust_a", product: "core", status: "active", current_revision: 1 },
+              revision: { payloadJson: JSON.stringify({ validity: { notBefore: "2026-01-01T00:00:00.000Z" } }) }
+            }
+          }));
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+      "operator-license-token"
+    );
+    const deployed = await adapter.markDeployed("lic_deploy", {
+      idempotencyKey: "123",
+      instanceId: "i-123",
+      environment: "production",
+      deploymentMode: "self-hosted",
+      label: ""
+    });
+    expect(callCount).toBe(2);
+    expect(deployed.id).toBe("lic_deploy");
+    expect(deployed.customerId).toBe("cust_a");
+  });
 });
 
 describe("PortalAdapter contract", () => {

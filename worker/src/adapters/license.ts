@@ -371,7 +371,7 @@ export class LicenseAdapter {
     }
 
     async markDeployed(licenseId: string, req: { idempotencyKey: string; instanceId: string; environment: string; deploymentMode: string; label?: string }): Promise<LicenseDocument> {
-        const res = await this.fetchJson<LicenseEnvelope>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}/activations`, {
+        await this.fetchJson<any>(`/internal/v1/licenses/${encodeURIComponent(licenseId)}/activations`, {
             method: "POST",
             headers: { "Idempotency-Key": req.idempotencyKey },
             body: JSON.stringify({
@@ -381,7 +381,6 @@ export class LicenseAdapter {
                 label: req.label
             }),
         });
-        const { row, claim } = this.unwrapRecord(res.data);
-        return this.mapRow(row, claim);
+        return this.getLicense(licenseId);
     }
 }
