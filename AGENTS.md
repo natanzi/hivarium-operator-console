@@ -11,7 +11,7 @@ This is not the public marketing site, customer self-service portal, runtime age
 This service owns:
 
 - customer master records and lifecycle state;
-- monthly, annual, prepaid, and negotiated commercial arrangements;
+- monthly, annual, and prepaid commercial arrangements (the `commercial_arrangements.model` column accepts only these three values — do not write or assume a "negotiated" value; it is not in the schema's CHECK constraint);
 - whole-token credit and immutable usage-ledger transactions;
 - running balances derived from ledger transactions;
 - agent catalog metadata used by customer operations;
